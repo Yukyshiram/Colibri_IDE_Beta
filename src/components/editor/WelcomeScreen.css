@@ -1,0 +1,277 @@
+.welcome-screen {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  background: radial-gradient(circle at 20% 15%, rgba(79, 195, 247, 0.15), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(124, 242, 154, 0.1), transparent 35%),
+    #0f1117;
+}
+
+.welcome-screen-initial {
+  padding: 42px;
+}
+
+.welcome-screen-project {
+  padding: 18px;
+}
+
+.welcome-card {
+  width: min(720px, 100%);
+  padding: 42px 36px;
+  border: 1px solid #2a3140;
+  border-radius: 14px;
+  background: rgba(22, 26, 34, 0.88);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+.welcome-logo {
+  width: 74px;
+  height: 74px;
+  border-radius: 16px;
+  display: block;
+  margin-bottom: 12px;
+  object-fit: cover;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.welcome-screen-initial .welcome-card {
+  width: min(780px, 100%);
+  padding: 48px 40px;
+}
+
+.welcome-screen-project .welcome-card {
+  width: min(680px, 100%);
+}
+
+.welcome-title {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+  letter-spacing: 0.04em;
+  font-weight: 800;
+  color: #e6edf3;
+}
+
+.welcome-subtitle {
+  margin: 10px 0 0;
+  color: #9aa4b2;
+  font-size: 1rem;
+}
+
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.welcome-button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: #4fc3f7;
+  color: #0f172a;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.welcome-button:hover {
+  background: #7dd3fc;
+}
+
+.welcome-button-secondary {
+  background: transparent;
+  border-color: #2a3140;
+  color: #e6edf3;
+}
+
+.welcome-button-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.welcome-tips {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid #2a3140;
+}
+
+.welcome-tips h2 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7dd3fc;
+}
+
+.welcome-tips ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #c7d2de;
+  line-height: 1.8;
+}
+
+.welcome-recent {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #2a3140;
+}
+
+.welcome-recent h2 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7cf29a;
+}
+
+.welcome-recent-empty {
+  margin: 0;
+  color: #9aa4b2;
+  font-size: 0.92rem;
+}
+
+.welcome-recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.welcome-recent-li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.welcome-recent-item {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #2a3140;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: inherit;
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.welcome-recent-item:hover {
+  border-color: #3b6f83;
+  background: rgba(79, 195, 247, 0.08);
+}
+
+.welcome-recent-item-last {
+  border-color: rgba(124, 242, 154, 0.36);
+  box-shadow: inset 0 0 0 1px rgba(124, 242, 154, 0.16);
+}
+
+.welcome-recent-item-last:hover {
+  border-color: rgba(124, 242, 154, 0.56);
+  background: rgba(124, 242, 154, 0.08);
+}
+
+.welcome-recent-item-invalid {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(248, 113, 113, 0.04);
+}
+
+.welcome-recent-item-invalid:hover {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.welcome-recent-item-icon {
+  flex-shrink: 0;
+  font-size: 15px;
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+.welcome-recent-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.welcome-recent-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6edf3;
+  font-weight: 700;
+  font-size: 0.89rem;
+}
+
+.welcome-recent-invalid-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fca5a5;
+  background: rgba(252, 165, 165, 0.12);
+  border: 1px solid rgba(252, 165, 165, 0.28);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.welcome-recent-last-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #b8f7c9;
+  background: rgba(124, 242, 154, 0.14);
+  border: 1px solid rgba(124, 242, 154, 0.28);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.welcome-recent-path {
+  color: #9aa4b2;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.welcome-recent-date {
+  color: #4b5668;
+  font-size: 0.76rem;
+  margin-top: 1px;
+}
+
+.welcome-recent-remove {
+  flex-shrink: 0;
+  align-self: center;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #9aa4b2;
+  cursor: pointer;
+  padding: 5px 9px;
+  font-size: 16px;
+  line-height: 1;
+  transition: opacity 0.12s, background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.welcome-recent-li:hover .welcome-recent-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.welcome-recent-remove:hover {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #fca5a5;
+}

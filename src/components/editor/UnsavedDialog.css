@@ -1,0 +1,150 @@
+/* ─── Overlay ─────────────────────────────────────────────────────────── */
+.unsaved-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  animation: unsaved-fade-in 120ms ease-out forwards;
+}
+
+@keyframes unsaved-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ─── Dialog card ──────────────────────────────────────────────────────── */
+.unsaved-dialog {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  padding: 28px 28px 22px;
+  width: min(420px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: unsaved-slide-in 140ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes unsaved-slide-in {
+  from { transform: scale(0.92) translateY(-8px); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ─── Warning icon ─────────────────────────────────────────────────────── */
+.unsaved-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(250, 189, 47, 0.12);
+  color: #f9e2af;
+  flex-shrink: 0;
+  margin: 0 auto;
+}
+
+.unsaved-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ─── Body text ────────────────────────────────────────────────────────── */
+.unsaved-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: center;
+}
+
+.unsaved-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #cdd6f4;
+  margin: 0;
+}
+
+.unsaved-message {
+  font-size: 13px;
+  color: #a6adc8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.unsaved-filename {
+  color: #89b4fa;
+  font-weight: 500;
+}
+
+.unsaved-filelist {
+  margin: 4px 0 0;
+  padding: 0 0 0 16px;
+  list-style: disc;
+  font-size: 12px;
+  color: #89b4fa;
+  max-height: 100px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+/* ─── Buttons ──────────────────────────────────────────────────────────── */
+.unsaved-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.unsaved-btn {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, opacity 120ms;
+  outline: none;
+}
+
+.unsaved-btn:focus-visible {
+  outline: 2px solid #89b4fa;
+  outline-offset: 2px;
+}
+
+/* Save — accent blue */
+.unsaved-btn-save {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border-color: #89b4fa;
+}
+.unsaved-btn-save:hover {
+  background: #aac7ff;
+  border-color: #aac7ff;
+}
+
+/* Discard — subtle red */
+.unsaved-btn-discard {
+  background: rgba(243, 139, 168, 0.12);
+  color: #f38ba8;
+  border-color: rgba(243, 139, 168, 0.25);
+}
+.unsaved-btn-discard:hover {
+  background: rgba(243, 139, 168, 0.2);
+  border-color: rgba(243, 139, 168, 0.4);
+}
+
+/* Cancel — neutral */
+.unsaved-btn-cancel {
+  background: transparent;
+  color: #6c7086;
+  border-color: #313244;
+}
+.unsaved-btn-cancel:hover {
+  background: #313244;
+  color: #a6adc8;
+}

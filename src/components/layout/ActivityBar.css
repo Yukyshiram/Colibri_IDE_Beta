@@ -1,0 +1,33 @@
+.activity-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  background: #121722;
+  border-right: 1px solid var(--border);
+}
+
+.activity-bar-button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+}
+
+.activity-bar-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.activity-bar-button.active {
+  background: rgba(79, 195, 247, 0.2);
+  color: #9edfff;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
