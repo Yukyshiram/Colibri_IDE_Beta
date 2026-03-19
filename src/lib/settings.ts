@@ -10,6 +10,9 @@ export const DEFAULT_IDE_SETTINGS: IDESettings = {
   showHiddenFiles: false,
   theme: "colibri-dark",
   showWelcomeOnStart: true,
+  discordPresence: {
+    enabled: false,
+  },
 };
 
 export function loadIDESettings(): IDESettings {
@@ -48,6 +51,14 @@ export function loadIDESettings(): IDESettings {
         typeof parsed.showWelcomeOnStart === "boolean"
           ? parsed.showWelcomeOnStart
           : DEFAULT_IDE_SETTINGS.showWelcomeOnStart,
+      discordPresence: {
+        enabled:
+          typeof parsed.discordPresence === "object" &&
+          parsed.discordPresence !== null &&
+          typeof parsed.discordPresence.enabled === "boolean"
+            ? parsed.discordPresence.enabled
+            : DEFAULT_IDE_SETTINGS.discordPresence.enabled,
+      },
     };
   } catch {
     return DEFAULT_IDE_SETTINGS;

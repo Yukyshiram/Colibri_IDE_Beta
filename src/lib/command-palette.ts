@@ -2,6 +2,7 @@ export type CommandPaletteActionId =
   | "open-folder"
   | "new-file"
   | "new-folder"
+  | "format-document"
   | "build"
   | "run"
   | "toggle-terminal"
@@ -33,6 +34,12 @@ export const COMMAND_PALETTE_DEFINITIONS: CommandPaletteActionDefinition[] = [
     label: "New Folder",
     hint: "Crear carpeta nueva",
     keywords: ["new", "folder", "carpeta", "crear"],
+  },
+  {
+    id: "format-document",
+    label: "Format Document",
+    hint: "Formatear archivo activo con clang-format",
+    keywords: ["format", "document", "clang-format", "beautify", "formatear"],
   },
   {
     id: "build",

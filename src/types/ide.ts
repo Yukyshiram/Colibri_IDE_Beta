@@ -55,5 +55,8 @@ export type IDESettings = {
   showHiddenFiles: boolean;
   theme: IDETheme;
   showWelcomeOnStart: boolean;
+  discordPresence: {
+    enabled: boolean;
+  };
 };
 

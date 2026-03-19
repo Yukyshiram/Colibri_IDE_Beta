@@ -22,7 +22,9 @@ import TopBar from "./components/layout/TopBar";
 import type { NewMenuAction } from "./components/layout/TopBar";
 import ActivityBar from "./components/layout/ActivityBar";
 import StatusBar from "./components/layout/StatusBar";
-import FileExplorer from "./components/explorer/FileExplorer";
+import ExplorerView from "./components/sidebar/ExplorerView";
+import SearchView from "./components/sidebar/SearchView";
+import ToolsView from "./components/sidebar/ToolsView";
 import CodeEditor from "./components/editor/CodeEditor";
 import WelcomeScreen from "./components/editor/WelcomeScreen";
 import BottomPanel from "./components/panels/BottomPanel";
@@ -30,10 +32,21 @@ import UnsavedDialog from "./components/editor/UnsavedDialog";
 import QuickOpenPalette from "./components/editor/QuickOpenPalette";
 import CommandPalette, { type CommandPaletteItem } from "./components/editor/CommandPalette";
 import SettingsDialog from "./components/layout/SettingsDialog";
+import NewClassDialog, { type NewClassDialogSubmitPayload } from "./components/layout/NewClassDialog";
+import NewProjectDialog, { type NewProjectDialogSubmitPayload } from "./components/layout/NewProjectDialog";
 
 import type { IDEFile, FileTreeNode, RecentProject, EditorCursorPosition, IDESettings, DiagnosticItem } from "./types/ide";
 import { detectLanguage } from "./lib/file-utils";
 import { BUILD_DIAGNOSTIC_FILE, parseGccOutput } from "./lib/gcc-parser";
+import {
+  generateCppClassFiles,
+  isValidCppClassName,
+  isValidCppNamespace,
+} from "./lib/cpp-class-templates";
+import {
+  generateConsoleMainContent,
+  type ConsoleProjectTemplate,
+} from "./lib/project-templates";
 import { flattenProjectFiles, type QuickOpenFileItem } from "./lib/project-files";
 import { COMMAND_PALETTE_DEFINITIONS, type CommandPaletteActionId } from "./lib/command-palette";
 import { applyThemeToDocument, loadIDESettings, saveIDESettings } from "./lib/settings";
@@ -82,12 +95,55 @@ type CreateProjectRequest = {
   language: "c" | "cpp";
   projectName: string;
   baseDirectory: string;
+  createProjectFolder?: boolean;
+  template?: ConsoleProjectTemplate;
+};
+
+type ClangFormatToolStatus = {
+  status: "system-installed" | "colibri-installed" | "not-installed";
+  system_path: string | null;
+  managed_path: string | null;
+  active_path: string | null;
+};
+
+type DiscordPresenceStatus =
+  | "editing"
+  | "browsing_files"
+  | "compiling"
+  | "build_failed"
+  | "running";
+
+type DiscordPresencePayload = {
+  status: DiscordPresenceStatus;
+  file_name: string | null;
+  project_name: string | null;
 };
 
 const RECENT_PROJECTS_STORAGE_KEY = "colibri.recentProjects";
 const LAST_PROJECT_STORAGE_KEY = "colibri.lastProjectPath";
 const MAX_RECENT_PROJECTS = 10;
 const WELCOME_RECENT_PREVIEW_LIMIT = 3;
+
+const EMPTY_CLANG_FORMAT_STATUS: ClangFormatToolStatus = {
+  status: "not-installed",
+  system_path: null,
+  managed_path: null,
+  active_path: null,
+};
+
+const NON_VIEWABLE_BINARY_EXTENSIONS = new Set([
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "o",
+  "obj",
+  "a",
+  "lib",
+]);
+
+const DISCORD_PRESENCE_THROTTLE_MS = 700;
 
 async function buildTree(basePath: string, entries: DirEntry[], showHiddenFiles: boolean): Promise<FileTreeNode[]> {
   const nodes: FileTreeNode[] = [];
@@ -150,12 +206,27 @@ export default function App() {
   const [activeBottomTab, setActiveBottomTab] = useState<"output" | "terminal" | "problems" | "console">("output");
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [jumpToLine, setJumpToLine] = useState<{ line: number; col: number; ts: number } | null>(null);
-  const [activeSideView, setActiveSideView] = useState<"explorer">("explorer");
+  const [activeSidebar, setActiveSidebar] = useState<"explorer" | "search" | "tools">("explorer");
   const [cursorPosition, setCursorPosition] = useState<EditorCursorPosition>({ line: 1, column: 1 });
   const [unsavedDialog, setUnsavedDialog] = useState<UnsavedDialogConfig | null>(null);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isNewClassDialogOpen, setIsNewClassDialogOpen] = useState(false);
+  const [newClassTargetDirectory, setNewClassTargetDirectory] = useState("");
+  const [newClassError, setNewClassError] = useState("");
+  const [isCreatingNewClass, setIsCreatingNewClass] = useState(false);
+  const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [newProjectDialogLanguage, setNewProjectDialogLanguage] = useState<"c" | "cpp">("c");
+  const [newProjectDialogLocation, setNewProjectDialogLocation] = useState("");
+  const [newProjectDialogError, setNewProjectDialogError] = useState("");
+  const [isCreatingNewProject, setIsCreatingNewProject] = useState(false);
+  const [defaultProjectsDirectory, setDefaultProjectsDirectory] = useState("");
+  const [clangFormatStatus, setClangFormatStatus] = useState<ClangFormatToolStatus>(
+    EMPTY_CLANG_FORMAT_STATUS
+  );
+  const [isCheckingClangFormat, setIsCheckingClangFormat] = useState(false);
+  const [isInstallingClangFormat, setIsInstallingClangFormat] = useState(false);
   const [isAutoOpening, setIsAutoOpening] = useState(false);
   const watcherCleanupRef = useRef<UnwatchFn | null>(null);
   const refreshDebounceRef = useRef<number | null>(null);
@@ -164,10 +235,137 @@ export default function App() {
   const mainWorkspaceRef = useRef<HTMLElement | null>(null);
   const bottomResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const lastDiagnosticNavigationRef = useRef<{ file: string; line: number; col: number } | null>(null);
+  const discordPresenceLastPayloadRef = useRef("");
+  const discordPresenceQueuedPayloadRef = useRef<{ key: string; payload: DiscordPresencePayload } | null>(null);
+  const discordPresenceDispatchingRef = useRef(false);
+  const discordPresenceThrottleRef = useRef<number | null>(null);
 
   const activeFile = useMemo(() => {
     return openFiles.find((file) => file.id === activeFileId);
   }, [openFiles, activeFileId]);
+
+  const flushDiscordPresenceQueue = () => {
+    if (!settings.discordPresence.enabled) {
+      return;
+    }
+
+    if (discordPresenceDispatchingRef.current) {
+      return;
+    }
+
+    const queued = discordPresenceQueuedPayloadRef.current;
+    if (!queued) {
+      return;
+    }
+
+    if (discordPresenceLastPayloadRef.current === queued.key) {
+      discordPresenceQueuedPayloadRef.current = null;
+      return;
+    }
+
+    discordPresenceQueuedPayloadRef.current = null;
+    discordPresenceDispatchingRef.current = true;
+
+    invoke("update_discord_presence", { payload: queued.payload })
+      .catch(() => {
+        // Best effort: ignorar cualquier fallo de Discord RPC.
+      })
+      .finally(() => {
+        discordPresenceDispatchingRef.current = false;
+        discordPresenceLastPayloadRef.current = queued.key;
+
+        if (!discordPresenceQueuedPayloadRef.current) {
+          return;
+        }
+
+        if (discordPresenceThrottleRef.current !== null) {
+          window.clearTimeout(discordPresenceThrottleRef.current);
+        }
+
+        discordPresenceThrottleRef.current = window.setTimeout(() => {
+          discordPresenceThrottleRef.current = null;
+          flushDiscordPresenceQueue();
+        }, DISCORD_PRESENCE_THROTTLE_MS);
+      });
+  };
+
+  const updateDiscordPresence = (
+    status: DiscordPresenceStatus,
+    fileName?: string | null
+  ) => {
+    if (!settings.discordPresence.enabled) {
+      return;
+    }
+
+    const payload = {
+      status,
+      file_name: fileName ?? null,
+      project_name: projectName && projectName !== "Sin proyecto" ? projectName : null,
+    };
+
+    const payloadKey = JSON.stringify(payload);
+    if (discordPresenceLastPayloadRef.current === payloadKey) {
+      return;
+    }
+
+    if (discordPresenceQueuedPayloadRef.current?.key === payloadKey) {
+      return;
+    }
+
+    discordPresenceQueuedPayloadRef.current = {
+      key: payloadKey,
+      payload,
+    };
+
+    if (discordPresenceDispatchingRef.current) {
+      return;
+    }
+
+    if (discordPresenceThrottleRef.current !== null) {
+      return;
+    }
+
+    discordPresenceThrottleRef.current = window.setTimeout(() => {
+      discordPresenceThrottleRef.current = null;
+      flushDiscordPresenceQueue();
+    }, DISCORD_PRESENCE_THROTTLE_MS);
+  };
+
+  useEffect(() => {
+    discordPresenceLastPayloadRef.current = "";
+    discordPresenceQueuedPayloadRef.current = null;
+
+    if (discordPresenceThrottleRef.current !== null) {
+      window.clearTimeout(discordPresenceThrottleRef.current);
+      discordPresenceThrottleRef.current = null;
+    }
+
+    if (settings.discordPresence.enabled) {
+      void invoke("start_discord_presence").catch(() => {
+        // Best effort.
+      });
+      return;
+    }
+
+    void invoke("stop_discord_presence").catch(() => {
+      // Best effort.
+    });
+  }, [settings.discordPresence.enabled]);
+
+  useEffect(() => {
+    return () => {
+      if (discordPresenceThrottleRef.current !== null) {
+        window.clearTimeout(discordPresenceThrottleRef.current);
+        discordPresenceThrottleRef.current = null;
+      }
+
+      discordPresenceQueuedPayloadRef.current = null;
+
+      void invoke("stop_discord_presence").catch(() => {
+        // Best effort.
+      });
+    };
+  }, []);
 
   const hasProjectOpen = Boolean(projectPath);
   const hasActiveEditorFile = openFiles.length > 0;
@@ -178,6 +376,9 @@ export default function App() {
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(() => {
     const isFileContextAvailable = Boolean(projectPath);
     const hasActiveFile = Boolean(activeFile);
+    const hasFormattableFile = Boolean(
+      activeFile && (activeFile.language === "c" || activeFile.language === "cpp")
+    );
 
     return COMMAND_PALETTE_DEFINITIONS.map((definition) => {
       let disabled = false;
@@ -188,6 +389,10 @@ export default function App() {
 
       if (definition.id === "build" || definition.id === "run" || definition.id === "close-active-tab") {
         disabled = !hasActiveFile;
+      }
+
+      if (definition.id === "format-document") {
+        disabled = !hasFormattableFile;
       }
 
       return {
@@ -387,6 +592,47 @@ export default function App() {
 
     void initializeRecentProjects();
   }, []);
+
+  useEffect(() => {
+    const loadDefaultProjectsDirectory = async () => {
+      try {
+        const path = await invoke<string>("resolve_default_projects_directory");
+        setDefaultProjectsDirectory(path);
+        setNewProjectDialogLocation((prev) => prev || path);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    void loadDefaultProjectsDirectory();
+  }, []);
+
+  const refreshClangFormatStatus = async () => {
+    setIsCheckingClangFormat(true);
+    try {
+      const status = await invoke<ClangFormatToolStatus>("get_clang_format_status");
+      setClangFormatStatus(status);
+    } catch (error) {
+      console.error(error);
+      setClangFormatStatus(EMPTY_CLANG_FORMAT_STATUS);
+      setBottomMessage(
+        `[Tools] No se pudo detectar clang-format: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      setIsCheckingClangFormat(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshClangFormatStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!isExplorerVisible || activeSidebar !== "tools") return;
+    void refreshClangFormatStatus();
+  }, [isExplorerVisible, activeSidebar]);
 
   useEffect(() => {
     saveIDESettings(settings);
@@ -638,6 +884,15 @@ export default function App() {
   const handleOpenFile = async (node: FileTreeNode) => {
     if (node.isDirectory) return;
 
+    const extension = node.name.split(".").pop()?.toLowerCase() ?? "";
+    if (NON_VIEWABLE_BINARY_EXTENSIONS.has(extension)) {
+      setSelectedNode(node);
+      setBottomMessage(
+        `[Colibrí IDE] No es posible visualizar archivos binarios en el editor: ${node.name}`
+      );
+      return;
+    }
+
     setSelectedNode(node);
 
     const alreadyOpen = openFiles.find((file) => file.path === node.path);
@@ -729,41 +984,62 @@ export default function App() {
     }
   };
 
-  const createProjectFromRequest = async ({ language, projectName, baseDirectory }: CreateProjectRequest): Promise<boolean> => {
+  const createProjectFromRequest = async ({
+    language,
+    projectName,
+    baseDirectory,
+    createProjectFolder,
+    template,
+  }: CreateProjectRequest): Promise<boolean> => {
     const projectNameValue = projectName.trim();
-    if (!projectNameValue) return false;
+    const baseDirectoryValue = baseDirectory.trim();
+    const shouldCreateFolder = createProjectFolder ?? true;
+    const selectedTemplate = template ?? "hello-world";
 
-    const projectPathValue = await join(baseDirectory, projectNameValue);
-    const projectExists = await exists(projectPathValue);
-    if (projectExists) {
-      setBottomMessage(`[Error] Ya existe un proyecto con ese nombre: ${projectNameValue}`);
+    if (!projectNameValue) {
+      setBottomMessage("[Error] El nombre del proyecto no puede estar vacío.");
       return false;
+    }
+
+    if (!baseDirectoryValue) {
+      setBottomMessage("[Error] Selecciona la ubicación del proyecto.");
+      return false;
+    }
+
+    const baseDirectoryExists = await exists(baseDirectoryValue);
+    if (!baseDirectoryExists) {
+      setBottomMessage(`[Error] La ubicación no existe: ${baseDirectoryValue}`);
+      return false;
+    }
+
+    const projectPathValue = shouldCreateFolder
+      ? await join(baseDirectoryValue, projectNameValue)
+      : baseDirectoryValue;
+
+    if (shouldCreateFolder) {
+      const projectExists = await exists(projectPathValue);
+      if (projectExists) {
+        setBottomMessage(`[Error] Ya existe un proyecto con ese nombre: ${projectNameValue}`);
+        return false;
+      }
+      await mkdir(projectPathValue);
     }
 
     const isCppProject = language === "cpp";
     const mainFileName = isCppProject ? "main.cpp" : "main.c";
-    const mainContent = isCppProject
-      ? [
-          "#include <iostream>",
-          "",
-          "int main() {",
-          "  std::cout << \"Hello from Colibri IDE!\\n\";",
-          "  return 0;",
-          "}",
-          "",
-        ].join("\n")
-      : [
-          "#include <stdio.h>",
-          "",
-          "int main() {",
-          "  printf(\"Hello from Colibri IDE!\\n\");",
-          "  return 0;",
-          "}",
-          "",
-        ].join("\n");
+    const mainContent = generateConsoleMainContent({
+      language,
+      template: selectedTemplate,
+    });
 
-    await mkdir(projectPathValue);
     const mainFilePath = await join(projectPathValue, mainFileName);
+
+    const mainFileAlreadyExists = await exists(mainFilePath);
+    if (mainFileAlreadyExists) {
+      setBottomMessage(`[Error] Ya existe ${mainFileName} en la ubicación seleccionada.`);
+      return false;
+    }
+
     await writeTextFile(mainFilePath, mainContent);
 
     await openProjectFolder(projectPathValue);
@@ -777,48 +1053,108 @@ export default function App() {
     return true;
   };
 
-  const handleCreateProjectFromWelcome = async (request: CreateProjectRequest): Promise<boolean> => {
+  const handleCreateProjectFromNewMenu = async (language: "c" | "cpp") => {
+    setNewProjectDialogLanguage(language);
+    setNewProjectDialogLocation(defaultProjectsDirectory || projectPath || "");
+    setNewProjectDialogError("");
+    setIsNewProjectDialogOpen(true);
+  };
+
+  const handleOpenNewProjectFromWelcome = () => {
+    setNewProjectDialogLanguage("c");
+    setNewProjectDialogLocation(defaultProjectsDirectory || "");
+    setNewProjectDialogError("");
+    setIsNewProjectDialogOpen(true);
+  };
+
+  const handlePickNewProjectLocation = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Selecciona dónde crear el proyecto",
+      defaultPath: newProjectDialogLocation || defaultProjectsDirectory || projectPath || undefined,
+    });
+
+    if (!selected || Array.isArray(selected)) return;
+    setNewProjectDialogLocation(selected);
+    setNewProjectDialogError("");
+  };
+
+  const handleUseExistingClangFormat = async () => {
+    setIsInstallingClangFormat(true);
+
     try {
-      return await createProjectFromRequest(request);
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Selecciona un ejecutable clang-format existente",
+        filters: [
+          {
+            name: "clang-format",
+            extensions: ["exe"],
+          },
+        ],
+      });
+
+      if (!picked || Array.isArray(picked)) {
+        setBottomMessage("[Tools] Selección cancelada. No se cambió la configuración.");
+        return;
+      }
+
+      const installed = await invoke<ClangFormatToolStatus>("install_clang_format_managed", {
+        sourcePath: picked,
+      });
+
+      setClangFormatStatus(installed);
+      setBottomMessage("[Tools] clang-format configurado desde una instalación existente.");
     } catch (error) {
-      console.error(error);
       setBottomMessage(
-        `[Error] No se pudo crear el proyecto: ${
+        `[Tools] No se pudo usar esa instalación de clang-format: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
-      return false;
+    } finally {
+      setIsInstallingClangFormat(false);
+      void refreshClangFormatStatus();
     }
   };
 
-  const handleCreateProjectFromNewMenu = async (language: "c" | "cpp") => {
+  const handleSubmitNewProjectDialog = async (payload: NewProjectDialogSubmitPayload) => {
+    if (!payload.location.trim()) {
+      setNewProjectDialogError("Selecciona una ubicación para el proyecto.");
+      return;
+    }
+
+    if (!payload.projectName.trim()) {
+      setNewProjectDialogError("El nombre del proyecto es obligatorio.");
+      return;
+    }
+
+    setIsCreatingNewProject(true);
+    setNewProjectDialogError("");
+
     try {
-      const baseDirectory = await open({
-        directory: true,
-        multiple: false,
-        title: "Selecciona dónde crear el proyecto",
-        defaultPath: projectPath || undefined,
-      });
-
-      if (!baseDirectory || Array.isArray(baseDirectory)) return;
-
-      const projectNameInput = window.prompt("Nombre del proyecto", "nuevo-proyecto-c");
-      const projectNameValue = projectNameInput?.trim();
-      if (!projectNameValue) return;
       const created = await createProjectFromRequest({
-        language,
-        projectName: projectNameValue,
-        baseDirectory,
+        language: payload.language,
+        projectName: payload.projectName,
+        baseDirectory: payload.location,
+        createProjectFolder: payload.createProjectFolder,
+        template: payload.template,
       });
 
-      if (!created) return;
+      if (!created) {
+        setNewProjectDialogError("No se pudo crear el proyecto. Revisa nombre y ubicación.");
+        return;
+      }
+
+      setIsNewProjectDialogOpen(false);
     } catch (error) {
       console.error(error);
-      setBottomMessage(
-        `[Error] No se pudo crear el proyecto: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+      setNewProjectDialogError(
+        `No se pudo crear el proyecto: ${error instanceof Error ? error.message : String(error)}`
       );
+    } finally {
+      setIsCreatingNewProject(false);
     }
   };
 
@@ -858,6 +1194,17 @@ export default function App() {
           ].join("\n"),
         });
         break;
+      case "cpp-class": {
+        if (!projectPath) {
+          setBottomMessage("[Error] Abre una carpeta antes de crear una clase C++.");
+          return;
+        }
+
+        setNewClassTargetDirectory(resolveTargetDirectory());
+        setNewClassError("");
+        setIsNewClassDialogOpen(true);
+        break;
+      }
       case "header-file":
         await handleNewFile(undefined, {
           defaultName: "new_header.h",
@@ -879,6 +1226,120 @@ export default function App() {
         break;
       default:
         break;
+    }
+  };
+
+  const handlePickNewClassDirectory = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Selecciona carpeta destino para la clase C++",
+      defaultPath: newClassTargetDirectory || projectPath || undefined,
+    });
+
+    if (!selected || Array.isArray(selected)) return;
+    setNewClassTargetDirectory(selected);
+    setNewClassError("");
+  };
+
+  const handleCreateNewCppClass = async (payload: NewClassDialogSubmitPayload) => {
+    const className = payload.className.trim();
+    const namespaceName = payload.namespaceName.trim();
+    const targetDirectory = payload.targetDirectory.trim();
+
+    if (!projectPath) {
+      setNewClassError("Abre un proyecto antes de crear clases C++.");
+      return;
+    }
+
+    if (!targetDirectory) {
+      setNewClassError("Selecciona una carpeta destino.");
+      return;
+    }
+
+    if (!payload.generateHeader && !payload.generateSource) {
+      setNewClassError("Debes generar al menos un archivo (.h o .cpp).");
+      return;
+    }
+
+    if (!isValidCppClassName(className)) {
+      setNewClassError("Nombre de clase invalido. Usa formato C++ (ej: MyClass).");
+      return;
+    }
+
+    if (!isValidCppNamespace(namespaceName)) {
+      setNewClassError("Namespace invalido. Usa formato como app::core.");
+      return;
+    }
+
+    const generation = generateCppClassFiles({
+      className,
+      namespaceName,
+      baseClass: payload.baseClass.trim(),
+      generateHeader: payload.generateHeader,
+      generateSource: payload.generateSource,
+      headerStyle: payload.headerStyle,
+      generateConstructor: payload.generateConstructor,
+      generateDestructor: payload.generateDestructor,
+    });
+
+    const filesToCreate: Array<{ path: string; name: string; content: string }> = [];
+
+    if (payload.generateHeader) {
+      filesToCreate.push({
+        path: await join(targetDirectory, generation.headerFileName),
+        name: generation.headerFileName,
+        content: generation.headerContent,
+      });
+    }
+
+    if (payload.generateSource) {
+      filesToCreate.push({
+        path: await join(targetDirectory, generation.sourceFileName),
+        name: generation.sourceFileName,
+        content: generation.sourceContent,
+      });
+    }
+
+    for (const file of filesToCreate) {
+      const alreadyExists = await exists(file.path);
+      if (alreadyExists) {
+        setNewClassError(`Ya existe el archivo: ${file.name}`);
+        return;
+      }
+    }
+
+    setIsCreatingNewClass(true);
+    setNewClassError("");
+
+    try {
+      for (const file of filesToCreate) {
+        await writeTextFile(file.path, file.content);
+      }
+
+      await refreshExplorer(projectPath);
+
+      for (const file of filesToCreate) {
+        await handleOpenFile({
+          name: file.name,
+          path: file.path,
+          isDirectory: false,
+        });
+      }
+
+      setIsNewClassDialogOpen(false);
+      setBottomMessage(
+        `[Colibrí IDE] Clase C++ creada: ${className} (${filesToCreate
+          .map((f) => f.name)
+          .join(", ")})`
+      );
+    } catch (error) {
+      console.error(error);
+      setNewClassError(
+        `No se pudo crear la clase: ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      setIsCreatingNewClass(false);
     }
   };
 
@@ -1280,6 +1741,9 @@ export default function App() {
     interactiveChildRef.current = child;
     setIsConsoleRunning(true);
     setLastConsoleRun({ filePath });
+
+    const fileName = filePath.split(/[\\/]/).pop() ?? null;
+    void updateDiscordPresence("running", fileName);
   };
 
   const handleSendConsoleInput = async (input: string) => {
@@ -1363,14 +1827,100 @@ export default function App() {
     setTerminalOutput("[Terminal] Limpia.");
   };
 
+  const openToolsForFormatSetup = () => {
+    setIsExplorerVisible(true);
+    setActiveSidebar("tools");
+  };
+
+  const handleMissingClangFormatForFormatting = async () => {
+    setBottomMessage(
+      "[Format] clang-format no está disponible. Configura una instalación existente desde Tools."
+    );
+
+    const configureNow = window.confirm(
+      "clang-format no está configurado. ¿Deseas seleccionar un ejecutable existente ahora?"
+    );
+
+    if (configureNow) {
+      await handleUseExistingClangFormat();
+      return;
+    }
+
+    const openTools = window.confirm("¿Deseas abrir la vista Tools para configurarlo después?");
+    if (openTools) {
+      openToolsForFormatSetup();
+    }
+  };
+
+  const handleFormatDocument = async () => {
+    if (!activeFile) {
+      setBottomMessage("[Error] No hay archivo activo para formatear.");
+      return;
+    }
+
+    if (activeFile.language !== "c" && activeFile.language !== "cpp") {
+      setBottomMessage("[Format] Solo se soporta Format Document para C/C++ por ahora.");
+      return;
+    }
+
+    try {
+      const status = await invoke<ClangFormatToolStatus>("get_clang_format_status");
+      setClangFormatStatus(status);
+
+      if (!status.active_path) {
+        await handleMissingClangFormatForFormatting();
+        return;
+      }
+
+      const formatted = await invoke<string>("format_document_with_clang", {
+        filePath: activeFile.path,
+        content: activeFile.content,
+      });
+
+      setOpenFiles((prev) =>
+        prev.map((file) => {
+          if (file.id !== activeFile.id) return file;
+
+          return {
+            ...file,
+            content: formatted,
+            isDirty: formatted !== file.savedContent,
+          };
+        })
+      );
+
+      setBottomMessage(
+        formatted === activeFile.content
+          ? "[Format] Sin cambios de formato."
+          : `[Format] Documento formateado con clang-format: ${activeFile.name}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.toLowerCase().includes("clang-format") && message.toLowerCase().includes("no está")) {
+        await handleMissingClangFormatForFormatting();
+        return;
+      }
+
+      setBottomMessage(`[Format] ${message}`);
+    }
+  };
+
   const handleSaveSettings = (nextSettings: IDESettings) => {
     setSettings(nextSettings);
     setIsSettingsOpen(false);
   };
 
-  const handleExplorerActivityClick = () => {
-    setActiveSideView("explorer");
-    setIsExplorerVisible((prev) => !prev);
+  const handleSelectSidebar = (view: "explorer" | "search" | "tools") => {
+    setActiveSidebar((current) => {
+      if (current === view) {
+        setIsExplorerVisible((prev) => !prev);
+        return current;
+      }
+
+      setIsExplorerVisible(true);
+      return view;
+    });
   };
 
   const handleBottomResizerMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1400,6 +1950,9 @@ export default function App() {
         break;
       case "build":
         void handleCompileFile();
+        break;
+      case "format-document":
+        void handleFormatDocument();
         break;
       case "run":
         void handleRunFile();
@@ -1468,6 +2021,64 @@ export default function App() {
   }, [settings.autoSave, activeFile]);
 
   useEffect(() => {
+    if (!hasProjectOpen) {
+      void updateDiscordPresence("browsing_files", null);
+      return;
+    }
+
+    if (isConsoleRunning) {
+      void updateDiscordPresence("running", activeFile?.name ?? null);
+      return;
+    }
+
+    if (activeFile) {
+      void updateDiscordPresence("editing", activeFile.name);
+      return;
+    }
+
+    void updateDiscordPresence("browsing_files", null);
+  }, [
+    hasProjectOpen,
+    isConsoleRunning,
+    activeFile?.id,
+    activeFile?.name,
+    projectName,
+    settings.discordPresence.enabled,
+  ]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isFormatDocument =
+        event.shiftKey &&
+        event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === "f";
+
+      if (!isFormatDocument) return;
+
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (isTypingTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      void handleFormatDocument();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeFile]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const isQuickOpen =
         (event.ctrlKey || event.metaKey) &&
@@ -1513,7 +2124,7 @@ export default function App() {
 
       event.preventDefault();
       setIsExplorerVisible((prev) => !prev);
-      setActiveSideView("explorer");
+      setActiveSidebar("explorer");
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1596,6 +2207,8 @@ export default function App() {
       return;
     }
 
+    void updateDiscordPresence("compiling", activeFile.name);
+
     try {
       const saved = await handleSaveFile();
       if (!saved) return;
@@ -1630,6 +2243,7 @@ export default function App() {
             .join("\n\n")
         );
         setActiveBottomTab(parsed.length > 0 ? "problems" : "output");
+        void updateDiscordPresence("editing", activeFile.name);
       } else {
         setBottomMessage(
           [
@@ -1642,6 +2256,7 @@ export default function App() {
             .join("\n\n")
         );
         setActiveBottomTab("problems");
+        void updateDiscordPresence("build_failed", activeFile.name);
       }
     } catch (error) {
       console.error(error);
@@ -1650,6 +2265,7 @@ export default function App() {
           error instanceof Error ? error.message : String(error)
         }`
       );
+      void updateDiscordPresence("build_failed", activeFile.name);
     }
   };
 
@@ -1716,6 +2332,8 @@ export default function App() {
       return;
     }
 
+    void updateDiscordPresence("compiling", activeFile.name);
+
     try {
       if (activeFile.isDirty) {
         const saved = await handleSaveFile();
@@ -1748,6 +2366,7 @@ export default function App() {
             .join("\n\n")
         );
         setActiveBottomTab("problems");
+        void updateDiscordPresence("build_failed", activeFile.name);
         return;
       }
 
@@ -1775,6 +2394,7 @@ export default function App() {
           error instanceof Error ? error.message : String(error)
         }`
       );
+      void updateDiscordPresence("build_failed", activeFile.name);
     }
   };
 
@@ -1784,19 +2404,36 @@ export default function App() {
 
   if (!hasProjectOpen) {
     return (
-      <div className="app-initial-shell">
-        <WelcomeScreen
-          mode="initial"
-          onOpenFolder={handleOpenFolder}
-          onCreateProject={handleCreateProjectFromWelcome}
-          recentProjects={recentProjects.slice(0, WELCOME_RECENT_PREVIEW_LIMIT)}
-          recentProjectsForModal={recentProjects.slice(0, MAX_RECENT_PROJECTS)}
-          missingRecentPaths={missingRecentPaths}
-          lastProjectPath={lastProjectPath}
-          onOpenRecentProject={handleOpenRecentProject}
-          onRemoveRecentProject={handleRemoveRecentProject}
+      <>
+        <div className="app-initial-shell">
+          <WelcomeScreen
+            mode="initial"
+            onOpenFolder={handleOpenFolder}
+            onOpenNewProjectWizard={handleOpenNewProjectFromWelcome}
+            recentProjects={recentProjects.slice(0, WELCOME_RECENT_PREVIEW_LIMIT)}
+            recentProjectsForModal={recentProjects.slice(0, MAX_RECENT_PROJECTS)}
+            missingRecentPaths={missingRecentPaths}
+            lastProjectPath={lastProjectPath}
+            onOpenRecentProject={handleOpenRecentProject}
+            onRemoveRecentProject={handleRemoveRecentProject}
+          />
+        </div>
+
+        <NewProjectDialog
+          isOpen={isNewProjectDialogOpen}
+          initialLanguage={newProjectDialogLanguage}
+          location={newProjectDialogLocation}
+          isSubmitting={isCreatingNewProject}
+          errorMessage={newProjectDialogError}
+          onCancel={() => {
+            if (isCreatingNewProject) return;
+            setIsNewProjectDialogOpen(false);
+            setNewProjectDialogError("");
+          }}
+          onPickLocation={handlePickNewProjectLocation}
+          onSubmit={handleSubmitNewProjectDialog}
         />
-      </div>
+      </>
     );
   }
 
@@ -1809,6 +2446,7 @@ export default function App() {
         onToggleTerminalPanel={() => setIsBottomPanelVisible((prev) => !prev)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onSaveFile={handleSaveFile}
+        onFormatDocument={handleFormatDocument}
         onCompileFile={handleCompileFile}
         onRunFile={handleRunFile}
         onBuildAndRun={handleBuildAndRunFile}
@@ -1816,13 +2454,13 @@ export default function App() {
 
       <div className={`app-body ${isExplorerVisible ? "" : "app-body-explorer-hidden"}`}>
         <ActivityBar
-          activeView={activeSideView}
-          isExplorerVisible={isExplorerVisible}
-          onSelectExplorer={handleExplorerActivityClick}
+          activeSidebar={activeSidebar}
+          isSidebarVisible={isExplorerVisible}
+          onSelectSidebar={handleSelectSidebar}
         />
 
-        {isExplorerVisible && activeSideView === "explorer" && (
-          <FileExplorer
+        {isExplorerVisible && activeSidebar === "explorer" && (
+          <ExplorerView
             projectName={projectName}
             projectPath={projectPath}
             tree={tree}
@@ -1836,6 +2474,24 @@ export default function App() {
             onDeleteNode={handleDeleteNode}
             onMoveNode={handleMoveNode}
             onRefresh={handleRefreshExplorer}
+          />
+        )}
+
+        {isExplorerVisible && activeSidebar === "search" && (
+          <SearchView
+            projectPath={projectPath}
+            tree={tree}
+            onOpenFile={handleOpenFile}
+          />
+        )}
+
+        {isExplorerVisible && activeSidebar === "tools" && (
+          <ToolsView
+            clangFormatStatus={clangFormatStatus}
+            isCheckingClangFormat={isCheckingClangFormat}
+            isInstallingClangFormat={isInstallingClangFormat}
+            onReloadClangFormatStatus={refreshClangFormatStatus}
+            onUseExistingClangFormat={handleUseExistingClangFormat}
           />
         )}
 
@@ -1932,6 +2588,35 @@ export default function App() {
         settings={settings}
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSaveSettings}
+      />
+
+      <NewClassDialog
+        isOpen={isNewClassDialogOpen}
+        targetDirectory={newClassTargetDirectory || projectPath}
+        isSubmitting={isCreatingNewClass}
+        errorMessage={newClassError}
+        onCancel={() => {
+          if (isCreatingNewClass) return;
+          setIsNewClassDialogOpen(false);
+          setNewClassError("");
+        }}
+        onPickDirectory={handlePickNewClassDirectory}
+        onSubmit={handleCreateNewCppClass}
+      />
+
+      <NewProjectDialog
+        isOpen={isNewProjectDialogOpen}
+        initialLanguage={newProjectDialogLanguage}
+        location={newProjectDialogLocation}
+        isSubmitting={isCreatingNewProject}
+        errorMessage={newProjectDialogError}
+        onCancel={() => {
+          if (isCreatingNewProject) return;
+          setIsNewProjectDialogOpen(false);
+          setNewProjectDialogError("");
+        }}
+        onPickLocation={handlePickNewProjectLocation}
+        onSubmit={handleSubmitNewProjectDialog}
       />
     </div>
   );
