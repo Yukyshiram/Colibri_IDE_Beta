@@ -82,6 +82,77 @@
   border-top: 1px solid var(--border);
 }
 
+.settings-tools-section {
+  border-top: 1px solid var(--border);
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.settings-tools-section h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.settings-tool-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #101722;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.settings-tool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-tool-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.settings-tool-status.status-colibri {
+  color: #b8f7c9;
+  background: rgba(22, 163, 74, 0.25);
+}
+
+.settings-tool-status.status-system {
+  color: #cfe7ff;
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.settings-tool-status.status-missing {
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.25);
+}
+
+.settings-tool-line {
+  margin: 0;
+  font-size: 12px;
+  color: #c7d2de;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-tool-line span {
+  color: #8b96a8;
+  font-weight: 600;
+}
+
+.settings-tool-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .settings-btn {
   border: 1px solid var(--border);
   border-radius: 7px;

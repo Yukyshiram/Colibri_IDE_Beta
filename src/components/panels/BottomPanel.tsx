@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DiagnosticItem, DiagnosticFileGroup } from "../../types/ide";
 import { BUILD_DIAGNOSTIC_FILE } from "../../lib/gcc-parser";
 import { groupDiagnosticsByFile } from "../../lib/diagnostic-grouping";
@@ -48,6 +48,42 @@ export default function BottomPanel({
   onToggleVisibility,
 }: BottomPanelProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const bottomContentRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollConsoleRef = useRef(true);
+
+  const isNearBottom = (element: HTMLDivElement) => {
+    const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    return distanceToBottom <= 24;
+  };
+
+  const handleBottomContentScroll = () => {
+    const element = bottomContentRef.current;
+    if (!element || activeTab !== "console") return;
+    shouldAutoScrollConsoleRef.current = isNearBottom(element);
+  };
+
+  useEffect(() => {
+    if (activeTab !== "console") return;
+
+    const element = bottomContentRef.current;
+    if (!element) return;
+
+    if (shouldAutoScrollConsoleRef.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [consoleOutput, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "console") return;
+
+    const element = bottomContentRef.current;
+    if (!element) return;
+
+    shouldAutoScrollConsoleRef.current = isNearBottom(element);
+    if (shouldAutoScrollConsoleRef.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [activeTab]);
 
   const toggleGroupCollapse = (fileKey: string) => {
     const updated = new Set(collapsedGroups);
@@ -165,7 +201,11 @@ export default function BottomPanel({
         </button>
       </div>
 
-      <div className="bottom-panel-content">
+      <div
+        ref={bottomContentRef}
+        className="bottom-panel-content"
+        onScroll={handleBottomContentScroll}
+      >
         {activeTab === "output" ? (
           <>
             <pre className="bottom-panel-pre">{renderTaggedLog(message)}</pre>

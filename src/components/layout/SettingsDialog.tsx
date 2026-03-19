@@ -128,6 +128,23 @@ export default function SettingsDialog({
               onChange={(e) => updateDraft("showWelcomeOnStart", e.target.checked)}
             />
           </label>
+
+          <label className="settings-row">
+            <span>Discord Rich Presence (experimental)</span>
+            <input
+              type="checkbox"
+              checked={draft.discordPresence.enabled}
+              onChange={(e) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  discordPresence: {
+                    ...prev.discordPresence,
+                    enabled: e.target.checked,
+                  },
+                }))
+              }
+            />
+          </label>
         </div>
 
         <footer className="settings-actions">

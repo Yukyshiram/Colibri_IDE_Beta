@@ -1,0 +1,145 @@
+.new-class-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(6, 12, 20, 0.62);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.new-class-dialog {
+  width: min(700px, 100%);
+  border: 1px solid #2a3140;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #121a27 0%, #101722 100%);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42);
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.new-class-dialog h2 {
+  margin: 0;
+  color: #e6edf3;
+  font-size: 1.05rem;
+}
+
+.new-class-grid-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.new-class-field {
+  display: grid;
+  gap: 6px;
+}
+
+.new-class-field > span {
+  color: #a9b8ca;
+  font-size: 0.85rem;
+}
+
+.new-class-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #2b3646;
+  border-radius: 8px;
+  background: #0f1722;
+  color: #dce7f2;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.new-class-input:focus {
+  outline: none;
+  border-color: #4fc3f7;
+}
+
+.new-class-path-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.new-class-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.new-class-check {
+  color: #d0dbea;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.new-class-preview {
+  border: 1px solid #2b3646;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(79, 195, 247, 0.06);
+  display: grid;
+  gap: 4px;
+}
+
+.new-class-preview p {
+  margin: 0;
+  color: #cdd8e5;
+  font-size: 0.84rem;
+}
+
+.new-class-error {
+  margin: 0;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.25);
+  color: #fecaca;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+
+.new-class-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.new-class-btn {
+  border: none;
+  border-radius: 8px;
+  background: #4fc3f7;
+  color: #0b1220;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.new-class-btn:hover {
+  background: #7dd3fc;
+}
+
+.new-class-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.new-class-btn-secondary {
+  background: #1c2736;
+  color: #d9e5f2;
+  border: 1px solid #2b3646;
+}
+
+.new-class-btn-secondary:hover {
+  background: #243143;
+}
+
+@media (max-width: 720px) {
+  .new-class-grid-two,
+  .new-class-options-grid {
+    grid-template-columns: 1fr;
+  }
+}

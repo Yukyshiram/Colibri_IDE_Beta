@@ -5,6 +5,7 @@ export type NewMenuAction =
   | "empty-file"
   | "c-file"
   | "cpp-file"
+  | "cpp-class"
   | "header-file"
   | "c-project"
   | "cpp-project";
@@ -16,6 +17,7 @@ type TopBarProps = {
   onToggleTerminalPanel: () => void;
   onOpenSettings: () => void;
   onSaveFile: () => void | Promise<boolean>;
+  onFormatDocument: () => void | Promise<void>;
   onCompileFile: () => void | Promise<void>;
   onRunFile: () => void | Promise<void>;
   onBuildAndRun: () => void | Promise<void>;
@@ -28,12 +30,15 @@ export default function TopBar({
   onToggleTerminalPanel,
   onOpenSettings,
   onSaveFile,
+  onFormatDocument,
   onCompileFile,
   onRunFile,
   onBuildAndRun,
 }: TopBarProps) {
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement | null>(null);
+  const showRefreshButton = false;
+  const showFormatButton = false;
 
   useEffect(() => {
     if (!isNewMenuOpen) return;
@@ -84,6 +89,7 @@ export default function TopBar({
                 <button role="menuitem" onClick={() => runNewAction("empty-file")}>Empty file</button>
                 <button role="menuitem" onClick={() => runNewAction("c-file")}>C file</button>
                 <button role="menuitem" onClick={() => runNewAction("cpp-file")}>C++ file</button>
+                <button role="menuitem" onClick={() => runNewAction("cpp-class")}>C++ class...</button>
                 <button role="menuitem" onClick={() => runNewAction("header-file")}>Header file</button>
                 <div className="topbar-dropdown-separator" />
                 <button role="menuitem" onClick={() => runNewAction("c-project")}>Project (C)</button>
@@ -92,10 +98,11 @@ export default function TopBar({
             )}
           </div>
           <button onClick={onOpenFolder}>Abrir carpeta</button>
-          <button onClick={onRefreshExplorer}>Refrescar</button>
-          <button onClick={onToggleTerminalPanel}>Terminal</button>
+          {showRefreshButton && <button onClick={onRefreshExplorer}>Refrescar</button>}
+          <button onClick={onToggleTerminalPanel}>Consola</button>
           <button onClick={onOpenSettings}>Settings</button>
           <button onClick={onSaveFile}>Guardar</button>
+          {showFormatButton && <button onClick={onFormatDocument}>Format</button>}
           <button onClick={onCompileFile}>Build</button>
           <button onClick={onRunFile}>Run</button>
           <button className="topbar-primary-action" onClick={onBuildAndRun}>

@@ -1,24 +1,11 @@
 import "./WelcomeScreen.css";
 import type { RecentProject } from "../../types/ide";
 import { useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-
-type CreateProjectPayload = {
-  language: "c" | "cpp";
-  projectName: string;
-  baseDirectory: string;
-};
-
-type NewProjectValidationErrors = {
-  name?: string;
-  path?: string;
-  submit?: string;
-};
 
 type WelcomeScreenProps = {
   mode: "initial" | "project";
   onOpenFolder?: () => void | Promise<void>;
-  onCreateProject?: (payload: CreateProjectPayload) => boolean | Promise<boolean>;
+  onOpenNewProjectWizard?: () => void | Promise<void>;
   onNewFile?: () => void | Promise<void>;
   projectName?: string;
   recentProjects?: RecentProject[];
@@ -32,7 +19,7 @@ type WelcomeScreenProps = {
 export default function WelcomeScreen({
   mode,
   onOpenFolder,
-  onCreateProject,
+  onOpenNewProjectWizard,
   onNewFile,
   projectName,
   recentProjects = [],
@@ -43,109 +30,7 @@ export default function WelcomeScreen({
   onRemoveRecentProject,
 }: WelcomeScreenProps) {
   const isInitial = mode === "initial";
-  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isRecentAccessModalOpen, setIsRecentAccessModalOpen] = useState(false);
-  const [projectLanguage, setProjectLanguage] = useState<"c" | "cpp">("c");
-  const [projectNameInput, setProjectNameInput] = useState("nuevo-proyecto-c");
-  const [projectBasePath, setProjectBasePath] = useState("");
-  const [isSubmittingProject, setIsSubmittingProject] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<NewProjectValidationErrors>({});
-
-  const trimmedProjectName = projectNameInput.trim();
-  const canCreateProject = !isSubmittingProject;
-
-  const handleOpenNewProjectModal = () => {
-    setProjectLanguage("c");
-    setProjectNameInput("nuevo-proyecto-c");
-    setProjectBasePath("");
-    setValidationErrors({});
-    setIsNewProjectModalOpen(true);
-  };
-
-  const validateProjectForm = (): NewProjectValidationErrors => {
-    const nextErrors: NewProjectValidationErrors = {};
-
-    if (!projectBasePath.trim()) {
-      nextErrors.path = "Selecciona una ruta para crear el proyecto.";
-    }
-
-    if (!trimmedProjectName) {
-      nextErrors.name = "El nombre del proyecto es obligatorio.";
-      return nextErrors;
-    }
-
-    if (trimmedProjectName.length < 3) {
-      nextErrors.name = "El nombre debe tener al menos 3 caracteres.";
-      return nextErrors;
-    }
-
-    if (trimmedProjectName === "." || trimmedProjectName === "..") {
-      nextErrors.name = "Ese nombre no es válido para una carpeta de proyecto.";
-      return nextErrors;
-    }
-
-    if (/[<>:\"/\\|?*\x00-\x1F]/.test(trimmedProjectName)) {
-      nextErrors.name = "El nombre contiene caracteres no válidos (<>:\"/\\|?*).";
-      return nextErrors;
-    }
-
-    if (/[.\s]$/.test(trimmedProjectName)) {
-      nextErrors.name = "El nombre no debe terminar en espacio o punto.";
-      return nextErrors;
-    }
-
-    return nextErrors;
-  };
-
-  const handlePickProjectPath = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Selecciona dónde crear el proyecto",
-    });
-
-    if (!selected || Array.isArray(selected)) return;
-    setProjectBasePath(selected);
-    setValidationErrors((prev) => ({ ...prev, path: undefined, submit: undefined }));
-  };
-
-  const handleConfirmCreateProject = async () => {
-    if (!onCreateProject || !canCreateProject) return;
-
-    const errors = validateProjectForm();
-    setValidationErrors(errors);
-    if (errors.name || errors.path) return;
-
-    setIsSubmittingProject(true);
-    try {
-      const created = await onCreateProject({
-        language: projectLanguage,
-        projectName: trimmedProjectName,
-        baseDirectory: projectBasePath,
-      });
-
-      if (created) {
-        setIsNewProjectModalOpen(false);
-      } else {
-        setValidationErrors((prev) => ({
-          ...prev,
-          submit: "No se pudo crear el proyecto. Revisa nombre/ruta e intenta de nuevo.",
-        }));
-      }
-    } catch {
-      setValidationErrors((prev) => ({
-        ...prev,
-        submit: "Ocurrió un error al crear el proyecto. Intenta nuevamente.",
-      }));
-    } finally {
-      setIsSubmittingProject(false);
-    }
-  };
-
-  const nextProjectPath =
-    projectBasePath && trimmedProjectName
-      ? `${projectBasePath}${projectBasePath.match(/[\\/]$/) ? "" : "\\"}${trimmedProjectName}`
-      : "";
 
   const shortenPath = (pathValue: string) => {
     if (pathValue.length <= 54) {
@@ -187,7 +72,7 @@ export default function WelcomeScreen({
             <h1 className="welcome-title">
               Colibri IDE
               <span className="welcome-title-beta" aria-label="Version beta">
-                Beta V0.2
+                Beta V0.3
               </span>
             </h1>
             <p className="welcome-subtitle">
@@ -204,10 +89,10 @@ export default function WelcomeScreen({
                 </button>
               )}
 
-              {isInitial && onCreateProject && (
+              {isInitial && onOpenNewProjectWizard && (
                 <button
                   className="welcome-button welcome-button-secondary"
-                  onClick={handleOpenNewProjectModal}
+                  onClick={() => void onOpenNewProjectWizard()}
                 >
                   Nuevo proyecto
                 </button>
@@ -300,90 +185,6 @@ export default function WelcomeScreen({
           </div>
         )}
       </div>
-
-      {isInitial && isNewProjectModalOpen && onCreateProject && (
-        <div className="welcome-modal-overlay" onClick={() => setIsNewProjectModalOpen(false)}>
-          <div className="welcome-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <h2>Nuevo proyecto</h2>
-
-            <label className="welcome-modal-field">
-              <span>Nombre del proyecto</span>
-              <input
-                className={`welcome-modal-input ${validationErrors.name ? "welcome-modal-input-error" : ""}`}
-                value={projectNameInput}
-                onChange={(e) => {
-                  setProjectNameInput(e.target.value);
-                  setValidationErrors((prev) => ({ ...prev, name: undefined, submit: undefined }));
-                }}
-                placeholder="mi-proyecto-c"
-                autoFocus
-              />
-              {validationErrors.name && (
-                <span className="welcome-modal-error">{validationErrors.name}</span>
-              )}
-            </label>
-
-            <div className="welcome-modal-field">
-              <span>Ruta</span>
-              <div className="welcome-modal-path-row">
-                <input
-                  className={`welcome-modal-input ${validationErrors.path ? "welcome-modal-input-error" : ""}`}
-                  value={projectBasePath}
-                  placeholder="Selecciona una carpeta base..."
-                  readOnly
-                />
-                <button className="welcome-button welcome-button-secondary" onClick={() => void handlePickProjectPath()}>
-                  Seleccionar
-                </button>
-              </div>
-              {validationErrors.path && (
-                <span className="welcome-modal-error">{validationErrors.path}</span>
-              )}
-            </div>
-
-            <label className="welcome-modal-field">
-              <span>Lenguaje</span>
-              <select
-                className="welcome-project-language"
-                value={projectLanguage}
-                onChange={(event) => {
-                  setProjectLanguage(event.target.value as "c" | "cpp");
-                  setValidationErrors((prev) => ({ ...prev, submit: undefined }));
-                }}
-              >
-                <option value="c">C</option>
-                <option value="cpp">C++</option>
-              </select>
-            </label>
-
-            <div className="welcome-modal-summary">
-              <p><strong>Lenguaje:</strong> {projectLanguage === "c" ? "C" : "C++"}</p>
-              <p><strong>Nombre:</strong> {trimmedProjectName || "(vacío)"}</p>
-              <p><strong>Ruta final:</strong> {nextProjectPath || "(sin ruta)"}</p>
-            </div>
-            {validationErrors.submit && (
-              <p className="welcome-modal-submit-error">{validationErrors.submit}</p>
-            )}
-
-            <div className="welcome-modal-actions">
-              <button
-                className="welcome-button welcome-button-secondary"
-                onClick={() => setIsNewProjectModalOpen(false)}
-                disabled={isSubmittingProject}
-              >
-                Cancelar
-              </button>
-              <button
-                className="welcome-button"
-                onClick={() => void handleConfirmCreateProject()}
-                disabled={!canCreateProject}
-              >
-                {isSubmittingProject ? "Creando..." : "Confirmar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {isInitial && isRecentAccessModalOpen && (
         <div className="welcome-modal-overlay" onClick={() => setIsRecentAccessModalOpen(false)}>
