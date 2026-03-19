@@ -24,14 +24,39 @@
   border-radius: 14px;
   background: rgba(22, 26, 34, 0.88);
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+}
+
+.welcome-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.welcome-hero-content {
+  min-width: 0;
+}
+
+.welcome-logo-shell {
+  width: 178px;
+  height: 178px;
+  border-radius: 20px;
+  background: radial-gradient(circle at 35% 30%, rgba(79, 195, 247, 0.2), rgba(15, 23, 42, 0.2));
+  border: 1px solid #2a3140;
+  display: grid;
+  place-items: center;
 }
 
 .welcome-logo {
-  width: 74px;
-  height: 74px;
+  width: 152px;
+  height: 152px;
   border-radius: 16px;
   display: block;
-  margin-bottom: 12px;
+  margin: 0;
   object-fit: cover;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
 }
@@ -51,6 +76,45 @@
   letter-spacing: 0.04em;
   font-weight: 800;
   color: #e6edf3;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+}
+
+.welcome-title-beta {
+  display: inline-block;
+  font-size: clamp(0.82rem, 2vw, 1.08rem);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 900;
+  color: #ffe066;
+  text-shadow: 0 0 6px rgba(255, 224, 102, 0.35), 2px 2px 0 rgba(20, 16, 6, 0.6);
+  transform-origin: left center;
+  transform: rotate(-12deg);
+  animation: beta-splash-pop 0.95s ease-in-out infinite alternate,
+    beta-splash-shine 2.1s ease-in-out infinite;
+}
+
+@keyframes beta-splash-pop {
+  0% {
+    transform: rotate(-12deg) scale(1);
+  }
+
+  100% {
+    transform: rotate(-8deg) scale(1.13);
+  }
+}
+
+@keyframes beta-splash-shine {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  50% {
+    filter: brightness(1.24);
+  }
 }
 
 .welcome-subtitle {
@@ -59,11 +123,142 @@
   font-size: 1rem;
 }
 
+.welcome-credit {
+  margin: 6px 0 0;
+  color: #7f8ea4;
+  font-size: 0.88rem;
+}
+
 .welcome-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 26px;
+  margin-top: 14px;
+}
+
+.welcome-project-quick-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-project-language {
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: #111720;
+  color: #d9e4ef;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.welcome-project-language:focus {
+  outline: none;
+  border-color: #3f7f95;
+}
+
+.welcome-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 10, 17, 0.62);
+  display: grid;
+  place-items: center;
+  z-index: 70;
+  padding: 20px;
+}
+
+.welcome-modal {
+  width: min(640px, 100%);
+  border: 1px solid #2a3140;
+  border-radius: 12px;
+  background: #121a27;
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.42);
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.welcome-modal h2 {
+  margin: 0;
+  color: #e6edf3;
+  font-size: 1.08rem;
+}
+
+.welcome-modal-field {
+  display: grid;
+  gap: 6px;
+}
+
+.welcome-modal-field > span {
+  color: #9fb0c5;
+  font-size: 0.88rem;
+}
+
+.welcome-modal-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: #0f1722;
+  color: #d9e4ef;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.welcome-modal-input:focus {
+  outline: none;
+  border-color: #3f7f95;
+}
+
+.welcome-modal-input-error {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.welcome-modal-input-error:focus {
+  border-color: rgba(248, 113, 113, 0.95);
+}
+
+.welcome-modal-error {
+  color: #fca5a5;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.welcome-modal-path-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.welcome-modal-summary {
+  border: 1px solid #283446;
+  border-radius: 8px;
+  background: rgba(127, 142, 164, 0.08);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.welcome-modal-summary p {
+  margin: 0;
+  color: #c7d2de;
+  font-size: 0.88rem;
+}
+
+.welcome-modal-submit-error {
+  margin: 0;
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  background: rgba(127, 29, 29, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+
+.welcome-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .welcome-button {
@@ -91,7 +286,7 @@
 }
 
 .welcome-tips {
-  margin-top: 28px;
+  margin-top: 22px;
   padding-top: 18px;
   border-top: 1px solid #2a3140;
 }
@@ -115,14 +310,30 @@
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #2a3140;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.welcome-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .welcome-recent h2 {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 0.95rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #7cf29a;
+}
+
+.welcome-recent-modal-btn {
+  padding: 6px 10px;
+  font-size: 0.78rem;
 }
 
 .welcome-recent-empty {
@@ -137,7 +348,13 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.welcome-recent-list-modal {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .welcome-recent-li {
@@ -151,10 +368,10 @@
   min-width: 0;
   border: 1px solid #2a3140;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(14, 22, 33, 0.72);
   color: inherit;
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 11px 12px;
   text-align: left;
   display: flex;
   align-items: flex-start;
@@ -163,28 +380,28 @@
 }
 
 .welcome-recent-item:hover {
-  border-color: #3b6f83;
-  background: rgba(79, 195, 247, 0.08);
+  border-color: rgba(79, 195, 247, 0.42);
+  background: rgba(79, 195, 247, 0.1);
 }
 
 .welcome-recent-item-last {
-  border-color: rgba(124, 242, 154, 0.36);
-  box-shadow: inset 0 0 0 1px rgba(124, 242, 154, 0.16);
+  border-color: rgba(124, 242, 154, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(124, 242, 154, 0.12);
 }
 
 .welcome-recent-item-last:hover {
-  border-color: rgba(124, 242, 154, 0.56);
-  background: rgba(124, 242, 154, 0.08);
+  border-color: rgba(124, 242, 154, 0.52);
+  background: rgba(124, 242, 154, 0.12);
 }
 
-.welcome-recent-item-invalid {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: rgba(248, 113, 113, 0.04);
-}
-
-.welcome-recent-item-invalid:hover {
-  border-color: rgba(248, 113, 113, 0.5);
+.welcome-recent-item-missing {
+  border-color: rgba(248, 113, 113, 0.32);
   background: rgba(248, 113, 113, 0.08);
+}
+
+.welcome-recent-item-missing:hover {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.14);
 }
 
 .welcome-recent-item-icon {
@@ -211,17 +428,6 @@
   font-size: 0.89rem;
 }
 
-.welcome-recent-invalid-badge {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: #fca5a5;
-  background: rgba(252, 165, 165, 0.12);
-  border: 1px solid rgba(252, 165, 165, 0.28);
-  border-radius: 4px;
-  padding: 1px 5px;
-  flex-shrink: 0;
-}
-
 .welcome-recent-last-badge {
   font-size: 0.68rem;
   font-weight: 700;
@@ -235,8 +441,21 @@
   letter-spacing: 0.03em;
 }
 
+.welcome-recent-missing-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .welcome-recent-path {
-  color: #9aa4b2;
+  color: #94a3b8;
   font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
@@ -244,7 +463,7 @@
 }
 
 .welcome-recent-date {
-  color: #4b5668;
+  color: #7f8ea4;
   font-size: 0.76rem;
   margin-top: 1px;
 }
@@ -252,12 +471,12 @@
 .welcome-recent-remove {
   flex-shrink: 0;
   align-self: center;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.75;
+  pointer-events: auto;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #9aa4b2;
+  color: #7f8ea4;
   cursor: pointer;
   padding: 5px 9px;
   font-size: 16px;
@@ -267,11 +486,40 @@
 
 .welcome-recent-li:hover .welcome-recent-remove {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .welcome-recent-remove:hover {
-  background: rgba(248, 113, 113, 0.15);
-  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
   color: #fca5a5;
+}
+
+.welcome-modal-recent {
+  width: min(760px, 100%);
+}
+
+@media (max-width: 860px) {
+  .welcome-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .welcome-logo-shell {
+    justify-self: start;
+    width: 140px;
+    height: 140px;
+  }
+
+  .welcome-logo {
+    width: 118px;
+    height: 118px;
+  }
+
+  .welcome-title {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .welcome-title-beta {
+    margin-left: 2px;
+  }
 }

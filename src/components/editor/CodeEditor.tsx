@@ -35,6 +35,30 @@ export default function CodeEditor({
     const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
     const monacoRef = useRef<Monaco | null>(null);
     const jumpToLineRef = useRef(jumpToLine);
+    const editorAreaRef = useRef<HTMLDivElement | null>(null);
+    const lastAppliedJumpTsRef = useRef<number | null>(null);
+
+    const applyJump = (jump: { line: number; col: number; ts: number }) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+
+        if (lastAppliedJumpTsRef.current === jump.ts) {
+            return;
+        }
+
+        const currentPosition = ed.getPosition();
+        const isSamePosition =
+            currentPosition?.lineNumber === jump.line &&
+            currentPosition?.column === jump.col;
+
+        if (!isSamePosition) {
+            ed.setPosition({ lineNumber: jump.line, column: jump.col });
+            ed.revealLineInCenter(jump.line);
+        }
+
+        ed.focus();
+        lastAppliedJumpTsRef.current = jump.ts;
+    };
 
     useEffect(() => {
         jumpToLineRef.current = jumpToLine;
@@ -43,10 +67,7 @@ export default function CodeEditor({
     // Jump to line when the editor is already mounted (same file active)
     useEffect(() => {
         if (!jumpToLine || !editorRef.current) return;
-        const ed = editorRef.current;
-        ed.setPosition({ lineNumber: jumpToLine.line, column: jumpToLine.col });
-        ed.revealLineInCenter(jumpToLine.line);
-        ed.focus();
+        applyJump(jumpToLine);
     }, [jumpToLine]);
 
     // Apply diagnostic markers whenever diagnostics change (same editor mounted)
@@ -60,6 +81,39 @@ export default function CodeEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [diagnostics]);
 
+    // Keep Monaco layout synced with container resize (e.g. toggling sidebar with Ctrl+B)
+    useEffect(() => {
+        if (!editorAreaRef.current) return;
+
+        let rafId: number | null = null;
+        const relayout = () => {
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+            }
+
+            rafId = requestAnimationFrame(() => {
+                editorRef.current?.layout();
+                rafId = null;
+            });
+        };
+
+        const observer = new ResizeObserver(() => {
+            relayout();
+        });
+
+        observer.observe(editorAreaRef.current);
+        window.addEventListener("resize", relayout);
+        relayout();
+
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", relayout);
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+            }
+        };
+    }, [activeFile?.id]);
+
     const applyMarkers = (
         monaco: typeof MonacoNS,
         model: MonacoNS.editor.ITextModel,
@@ -71,9 +125,9 @@ export default function CodeEditor({
             .filter((d) => normalize(d.file) === normalize(filePath))
             .map((d) => ({
                 startLineNumber: d.line,
-                startColumn: d.col,
+                startColumn: d.column,
                 endLineNumber: d.line,
-                endColumn: d.col + 1,
+                endColumn: d.column + 1,
                 severity:
                     d.severity === "error"
                         ? monaco.MarkerSeverity.Error
@@ -122,7 +176,7 @@ export default function CodeEditor({
                 ))}
             </div>
 
-            <div className="editor-area">
+            <div className="editor-area" ref={editorAreaRef}>
                 {activeFile ? (
                     <Editor
                         key={activeFile.id}
@@ -148,9 +202,7 @@ export default function CodeEditor({
                             // Apply pending jump-to-line
                             const pending = jumpToLineRef.current;
                             if (pending) {
-                                editorInstance.setPosition({ lineNumber: pending.line, column: pending.col });
-                                editorInstance.revealLineInCenter(pending.line);
-                                editorInstance.focus();
+                                applyJump(pending);
                             }
                         }}
                         options={{

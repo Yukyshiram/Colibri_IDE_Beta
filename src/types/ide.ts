@@ -28,14 +28,23 @@ export type EditorCursorPosition = {
 
 export type IDETheme = "colibri-dark" | "colibri-light";
 
-export type DiagnosticSeverity = "error" | "warning" | "note";
+export type DiagnosticSeverity = "error" | "warning";
 
 export type DiagnosticItem = {
   file: string;
   line: number;
-  col: number;
+  column: number;
   severity: DiagnosticSeverity;
   message: string;
+  navigable: boolean;
+};
+
+export type DiagnosticFileGroup = {
+  file: string; // file path o "__build__" para globales
+  displayName: string; // filename o "Build & Linker Diagnostics"
+  errors: DiagnosticItem[];
+  warnings: DiagnosticItem[];
+  isGlobal: boolean; // true si file === "__build__"
 };
 
 export type IDESettings = {
