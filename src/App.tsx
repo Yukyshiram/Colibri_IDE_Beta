@@ -14,10 +14,12 @@ import {
 } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
+import { Command, type Child } from "@tauri-apps/plugin-shell";
 
 import "./App.css";
 
 import TopBar from "./components/layout/TopBar";
+import type { NewMenuAction } from "./components/layout/TopBar";
 import ActivityBar from "./components/layout/ActivityBar";
 import StatusBar from "./components/layout/StatusBar";
 import FileExplorer from "./components/explorer/FileExplorer";
@@ -31,7 +33,7 @@ import SettingsDialog from "./components/layout/SettingsDialog";
 
 import type { IDEFile, FileTreeNode, RecentProject, EditorCursorPosition, IDESettings, DiagnosticItem } from "./types/ide";
 import { detectLanguage } from "./lib/file-utils";
-import { parseGccOutput } from "./lib/gcc-parser";
+import { BUILD_DIAGNOSTIC_FILE, parseGccOutput } from "./lib/gcc-parser";
 import { flattenProjectFiles, type QuickOpenFileItem } from "./lib/project-files";
 import { COMMAND_PALETTE_DEFINITIONS, type CommandPaletteActionId } from "./lib/command-palette";
 import { applyThemeToDocument, loadIDESettings, saveIDESettings } from "./lib/settings";
@@ -39,17 +41,16 @@ import { applyThemeToDocument, loadIDESettings, saveIDESettings } from "./lib/se
 type CompileResult = {
   success: boolean;
   command: string;
+  source_files: string[];
   executable_path?: string | null;
   stdout: string;
   stderr: string;
 };
 
-type RunResult = {
-  success: boolean;
+type RunTargetResult = {
+  executable_path: string;
+  working_dir: string;
   command: string;
-  stdout: string;
-  stderr: string;
-  exit_code?: number | null;
 };
 
 type TerminalCommandResult = {
@@ -68,9 +69,25 @@ type UnsavedDialogConfig = {
   onCancel: () => void;
 };
 
+type NewFileOptions = {
+  defaultName: string;
+  templateContent: string;
+};
+
+type LastConsoleRun = {
+  filePath: string;
+};
+
+type CreateProjectRequest = {
+  language: "c" | "cpp";
+  projectName: string;
+  baseDirectory: string;
+};
+
 const RECENT_PROJECTS_STORAGE_KEY = "colibri.recentProjects";
 const LAST_PROJECT_STORAGE_KEY = "colibri.lastProjectPath";
-const MAX_RECENT_PROJECTS = 8;
+const MAX_RECENT_PROJECTS = 10;
+const WELCOME_RECENT_PREVIEW_LIMIT = 3;
 
 async function buildTree(basePath: string, entries: DirEntry[], showHiddenFiles: boolean): Promise<FileTreeNode[]> {
   const nodes: FileTreeNode[] = [];
@@ -119,13 +136,18 @@ export default function App() {
   const [activeFileId, setActiveFileId] = useState("");
   const [selectedNode, setSelectedNode] = useState<FileTreeNode | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [missingRecentPaths, setMissingRecentPaths] = useState<Set<string>>(new Set());
   const [lastProjectPath, setLastProjectPath] = useState("");
-  const [invalidRecentPaths, setInvalidRecentPaths] = useState<Set<string>>(new Set());
   const [bottomMessage, setBottomMessage] = useState("[Colibrí IDE] Listo.");
+  const [consoleOutput, setConsoleOutput] = useState("[Consola] Lista. Ejecuta un programa para interactuar.");
+  const [isConsoleRunning, setIsConsoleRunning] = useState(false);
+  const [lastConsoleRun, setLastConsoleRun] = useState<LastConsoleRun | null>(null);
   const [terminalOutput, setTerminalOutput] = useState("[Terminal] Lista. Escribe un comando y presiona Enter.");
   const [isRunningTerminalCommand, setIsRunningTerminalCommand] = useState(false);
   const [isBottomPanelVisible, setIsBottomPanelVisible] = useState(true);
-  const [activeBottomTab, setActiveBottomTab] = useState<"output" | "terminal" | "problemas">("output");
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(220);
+  const [isExplorerVisible, setIsExplorerVisible] = useState(true);
+  const [activeBottomTab, setActiveBottomTab] = useState<"output" | "terminal" | "problems" | "console">("output");
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [jumpToLine, setJumpToLine] = useState<{ line: number; col: number; ts: number } | null>(null);
   const [activeSideView, setActiveSideView] = useState<"explorer">("explorer");
@@ -138,6 +160,10 @@ export default function App() {
   const watcherCleanupRef = useRef<UnwatchFn | null>(null);
   const refreshDebounceRef = useRef<number | null>(null);
   const autoSaveTimeoutRef = useRef<number | null>(null);
+  const interactiveChildRef = useRef<Child | null>(null);
+  const mainWorkspaceRef = useRef<HTMLElement | null>(null);
+  const bottomResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const lastDiagnosticNavigationRef = useRef<{ file: string; line: number; col: number } | null>(null);
 
   const activeFile = useMemo(() => {
     return openFiles.find((file) => file.id === activeFileId);
@@ -221,6 +247,13 @@ export default function App() {
       return nextRecent;
     });
 
+    setMissingRecentPaths((prev) => {
+      if (!prev.has(nextPath)) return prev;
+      const next = new Set(prev);
+      next.delete(nextPath);
+      return next;
+    });
+
     window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, nextPath);
     setLastProjectPath(nextPath);
   };
@@ -250,7 +283,11 @@ export default function App() {
             onSave: async () => {
               setUnsavedDialog(null);
               for (const file of dirtyFiles) {
-                await saveFileDirectly(file);
+                const saved = await saveFileDirectly(file);
+                if (!saved) {
+                  reject(new Error("save-failed"));
+                  return;
+                }
               }
               resolve();
             },
@@ -273,6 +310,16 @@ export default function App() {
     const mappedTree = await buildTree(targetPath, rootEntries, settings.showHiddenFiles);
     const projectFolderName = getProjectNameFromPath(targetPath);
 
+    if (interactiveChildRef.current) {
+      try {
+        await interactiveChildRef.current.kill();
+      } catch {
+        // Ignore kill errors during project switch; process may have already exited.
+      } finally {
+        interactiveChildRef.current = null;
+      }
+    }
+
     setProjectPath(targetPath);
     setProjectName(projectFolderName);
     setTree(mappedTree);
@@ -281,28 +328,64 @@ export default function App() {
     setActiveFileId("");
     setDiagnostics([]);
     setJumpToLine(null);
+    setConsoleOutput("[Consola] Lista. Ejecuta un programa para interactuar.");
+    setIsConsoleRunning(false);
+    interactiveChildRef.current = null;
+    setLastConsoleRun(null);
     upsertRecentProject(targetPath);
     setBottomMessage(`[Colibrí IDE] Proyecto abierto: ${targetPath}`);
   };
 
   useEffect(() => {
-    setRecentProjects(loadRecentProjects());
-    const rememberedLastProjectPath = window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY) ?? "";
-    setLastProjectPath(rememberedLastProjectPath);
-
-    if (!settings.showWelcomeOnStart && rememberedLastProjectPath) {
-      setIsAutoOpening(true);
-      void (async () => {
-        try {
-          const pathExists = await exists(rememberedLastProjectPath);
-          if (pathExists) {
-            await openProjectFolder(rememberedLastProjectPath);
+    const initializeRecentProjects = async () => {
+      const loadedRecent = loadRecentProjects();
+      const existenceChecks = await Promise.all(
+        loadedRecent.map(async (project) => {
+          try {
+            return {
+              project,
+              exists: await exists(project.path),
+            };
+          } catch {
+            return {
+              project,
+              exists: false,
+            };
           }
+        })
+      );
+
+      const missing = existenceChecks
+        .filter((entry) => !entry.exists)
+        .map((entry) => entry.project.path);
+
+      setRecentProjects(loadedRecent.slice(0, MAX_RECENT_PROJECTS));
+      setMissingRecentPaths(new Set(missing));
+      saveRecentProjects(loadedRecent);
+
+      const rememberedLastProjectPath = window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY) ?? "";
+      const validLastPath = existenceChecks.some((entry) => entry.project.path === rememberedLastProjectPath && entry.exists)
+        ? rememberedLastProjectPath
+        : "";
+
+      if (validLastPath) {
+        setLastProjectPath(validLastPath);
+      } else {
+        setLastProjectPath("");
+        window.localStorage.removeItem(LAST_PROJECT_STORAGE_KEY);
+      }
+
+      if (!settings.showWelcomeOnStart && validLastPath) {
+        setIsAutoOpening(true);
+        try {
+          await openProjectFolder(validLastPath);
         } finally {
           setIsAutoOpening(false);
         }
-      })();
-    }
+      }
+    };
+
+    void initializeRecentProjects();
   }, []);
 
   useEffect(() => {
@@ -345,6 +428,48 @@ export default function App() {
   };
 
   const normalizePath = (pathValue: string) => pathValue.replace(/[\\/]+/g, "/").toLowerCase();
+
+  const navigateToDiagnosticLocation = (targetFile: IDEFile, line: number, col: number) => {
+    const normalizedTargetPath = normalizePath(targetFile.path);
+    const normalizedActivePath = activeFile ? normalizePath(activeFile.path) : "";
+    const isSameFile = normalizedTargetPath === normalizedActivePath;
+    const isSamePosition =
+      isSameFile &&
+      cursorPosition.line === line &&
+      cursorPosition.column === col;
+
+    // Keep active tab sync even if no jump event is emitted.
+    setActiveFileId(targetFile.id);
+
+    if (isSamePosition) {
+      lastDiagnosticNavigationRef.current = {
+        file: targetFile.path,
+        line,
+        col,
+      };
+      return;
+    }
+
+    const previous = lastDiagnosticNavigationRef.current;
+    const isRepeatedTarget =
+      previous !== null &&
+      normalizePath(previous.file) === normalizedTargetPath &&
+      previous.line === line &&
+      previous.col === col &&
+      isSameFile;
+
+    if (isRepeatedTarget) {
+      return;
+    }
+
+    const ts = Date.now();
+    lastDiagnosticNavigationRef.current = {
+      file: targetFile.path,
+      line,
+      col,
+    };
+    setJumpToLine({ line, col, ts });
+  };
 
   const isSameOrChildPath = (candidatePath: string, targetPath: string) => {
     const candidate = normalizePath(candidatePath);
@@ -451,19 +576,23 @@ export default function App() {
     try {
       const pathExists = await exists(targetPath);
       if (!pathExists) {
-        setInvalidRecentPaths((prev) => new Set(prev).add(targetPath));
+        setMissingRecentPaths((prev) => new Set(prev).add(targetPath));
+        setBottomMessage("[Colibrí IDE] Ese proyecto ya no existe en disco.");
         return;
       }
-      setInvalidRecentPaths((prev) => {
+
+      setMissingRecentPaths((prev) => {
         if (!prev.has(targetPath)) return prev;
         const next = new Set(prev);
         next.delete(targetPath);
         return next;
       });
+
       await openProjectFolder(targetPath);
     } catch (error) {
       console.error(error);
-      setInvalidRecentPaths((prev) => new Set(prev).add(targetPath));
+      setMissingRecentPaths((prev) => new Set(prev).add(targetPath));
+      setBottomMessage("[Colibrí IDE] No se pudo abrir ese proyecto reciente.");
     }
   };
 
@@ -473,12 +602,18 @@ export default function App() {
       saveRecentProjects(next);
       return next;
     });
-    setInvalidRecentPaths((prev) => {
+
+    setMissingRecentPaths((prev) => {
       if (!prev.has(targetPath)) return prev;
       const next = new Set(prev);
       next.delete(targetPath);
       return next;
     });
+
+    if (lastProjectPath === targetPath) {
+      setLastProjectPath("");
+      window.localStorage.removeItem(LAST_PROJECT_STORAGE_KEY);
+    }
   };
 
   const handleRefreshExplorer = async () => {
@@ -538,14 +673,17 @@ export default function App() {
     void handleOpenFile(item.node);
   };
 
-  const handleNewFile = async (contextNode?: FileTreeNode) => {
+  const handleNewFile = async (contextNode?: FileTreeNode, options?: NewFileOptions) => {
     if (!projectPath) {
       setBottomMessage("[Error] Abre una carpeta antes de crear un archivo nuevo.");
       return;
     }
 
     try {
-      const requestedName = window.prompt("Nombre del archivo nuevo", "main.c");
+      const requestedName = window.prompt(
+        "Nombre del archivo nuevo",
+        options?.defaultName ?? "main.c"
+      );
       const fileName = requestedName?.trim();
 
       if (!fileName) return;
@@ -559,15 +697,16 @@ export default function App() {
         return;
       }
 
-      await writeTextFile(filePath, "");
+      const initialContent = options?.templateContent ?? "";
+      await writeTextFile(filePath, initialContent);
 
       const newFile: IDEFile = {
         id: crypto.randomUUID(),
         name: fileName,
         path: filePath,
         language: detectLanguage(fileName),
-        content: "",
-        savedContent: "",
+        content: initialContent,
+        savedContent: initialContent,
         isDirty: false,
       };
 
@@ -587,6 +726,159 @@ export default function App() {
           error instanceof Error ? error.message : String(error)
         }`
       );
+    }
+  };
+
+  const createProjectFromRequest = async ({ language, projectName, baseDirectory }: CreateProjectRequest): Promise<boolean> => {
+    const projectNameValue = projectName.trim();
+    if (!projectNameValue) return false;
+
+    const projectPathValue = await join(baseDirectory, projectNameValue);
+    const projectExists = await exists(projectPathValue);
+    if (projectExists) {
+      setBottomMessage(`[Error] Ya existe un proyecto con ese nombre: ${projectNameValue}`);
+      return false;
+    }
+
+    const isCppProject = language === "cpp";
+    const mainFileName = isCppProject ? "main.cpp" : "main.c";
+    const mainContent = isCppProject
+      ? [
+          "#include <iostream>",
+          "",
+          "int main() {",
+          "  std::cout << \"Hello from Colibri IDE!\\n\";",
+          "  return 0;",
+          "}",
+          "",
+        ].join("\n")
+      : [
+          "#include <stdio.h>",
+          "",
+          "int main() {",
+          "  printf(\"Hello from Colibri IDE!\\n\");",
+          "  return 0;",
+          "}",
+          "",
+        ].join("\n");
+
+    await mkdir(projectPathValue);
+    const mainFilePath = await join(projectPathValue, mainFileName);
+    await writeTextFile(mainFilePath, mainContent);
+
+    await openProjectFolder(projectPathValue);
+    await handleOpenFile({
+      name: mainFileName,
+      path: mainFilePath,
+      isDirectory: false,
+    });
+
+    setBottomMessage(`[Colibrí IDE] Proyecto creado: ${projectPathValue}`);
+    return true;
+  };
+
+  const handleCreateProjectFromWelcome = async (request: CreateProjectRequest): Promise<boolean> => {
+    try {
+      return await createProjectFromRequest(request);
+    } catch (error) {
+      console.error(error);
+      setBottomMessage(
+        `[Error] No se pudo crear el proyecto: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return false;
+    }
+  };
+
+  const handleCreateProjectFromNewMenu = async (language: "c" | "cpp") => {
+    try {
+      const baseDirectory = await open({
+        directory: true,
+        multiple: false,
+        title: "Selecciona dónde crear el proyecto",
+        defaultPath: projectPath || undefined,
+      });
+
+      if (!baseDirectory || Array.isArray(baseDirectory)) return;
+
+      const projectNameInput = window.prompt("Nombre del proyecto", "nuevo-proyecto-c");
+      const projectNameValue = projectNameInput?.trim();
+      if (!projectNameValue) return;
+      const created = await createProjectFromRequest({
+        language,
+        projectName: projectNameValue,
+        baseDirectory,
+      });
+
+      if (!created) return;
+    } catch (error) {
+      console.error(error);
+      setBottomMessage(
+        `[Error] No se pudo crear el proyecto: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  };
+
+  const handleCreateFromNewMenu = async (action: NewMenuAction) => {
+    switch (action) {
+      case "empty-file":
+        await handleNewFile(undefined, {
+          defaultName: "untitled.txt",
+          templateContent: "",
+        });
+        break;
+      case "c-file":
+        await handleNewFile(undefined, {
+          defaultName: "main.c",
+          templateContent: [
+            "#include <stdio.h>",
+            "",
+            "int main() {",
+            "  printf(\"Hello from Colibri IDE!\\n\");",
+            "  return 0;",
+            "}",
+            "",
+          ].join("\n"),
+        });
+        break;
+      case "cpp-file":
+        await handleNewFile(undefined, {
+          defaultName: "main.cpp",
+          templateContent: [
+            "#include <iostream>",
+            "",
+            "int main() {",
+            "  std::cout << \"Hello from Colibri IDE!\\n\";",
+            "  return 0;",
+            "}",
+            "",
+          ].join("\n"),
+        });
+        break;
+      case "header-file":
+        await handleNewFile(undefined, {
+          defaultName: "new_header.h",
+          templateContent: [
+            "#ifndef NEW_HEADER_H",
+            "#define NEW_HEADER_H",
+            "",
+            "",
+            "#endif /* NEW_HEADER_H */",
+            "",
+          ].join("\n"),
+        });
+        break;
+      case "c-project":
+        await handleCreateProjectFromNewMenu("c");
+        break;
+      case "cpp-project":
+        await handleCreateProjectFromNewMenu("cpp");
+        break;
+      default:
+        break;
     }
   };
 
@@ -831,16 +1123,23 @@ export default function App() {
   };
 
   const handleCloseTab = (fileId: string) => {
-    const idx = openFiles.findIndex((f) => f.id === fileId);
-    const fileToClose = openFiles[idx];
+    const fileToClose = openFiles.find((f) => f.id === fileId);
 
     const performClose = () => {
-      setOpenFiles((prev) => prev.filter((file) => file.id !== fileId));
-      if (fileId === activeFileId) {
-        const updated = openFiles.filter((f) => f.id !== fileId);
-        const nextFile = updated[idx] ?? updated[idx - 1];
-        setActiveFileId(nextFile?.id ?? "");
-      }
+      setOpenFiles((prev) => {
+        const closeIdx = prev.findIndex((f) => f.id === fileId);
+        if (closeIdx === -1) return prev;
+
+        const updated = prev.filter((file) => file.id !== fileId);
+
+        setActiveFileId((current) => {
+          if (current !== fileId) return current;
+          const nextFile = updated[closeIdx] ?? updated[closeIdx - 1];
+          return nextFile?.id ?? "";
+        });
+
+        return updated;
+      });
     };
 
     if (fileToClose?.isDirty) {
@@ -908,6 +1207,119 @@ export default function App() {
     setTerminalOutput((prev) => `${prev}\n\n${nextBlock}`.trim());
   };
 
+  const appendConsoleOutput = (nextBlock: string) => {
+    setConsoleOutput((prev) => `${prev}\n${nextBlock}`.trim());
+  };
+
+  const stopInteractiveProcess = async () => {
+    if (!interactiveChildRef.current) return;
+
+    try {
+      await interactiveChildRef.current.kill();
+      appendConsoleOutput("[Consola] Proceso detenido por el usuario.");
+    } catch (error) {
+      appendConsoleOutput(
+        `[Consola][error] ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      interactiveChildRef.current = null;
+      setIsConsoleRunning(false);
+    }
+  };
+
+  const startInteractiveRun = async (filePath: string) => {
+    const target = await invoke<RunTargetResult>("resolve_run_target", { filePath });
+
+    if (interactiveChildRef.current) {
+      await stopInteractiveProcess();
+    }
+
+    setConsoleOutput(
+      [
+        "[Consola] Ejecución iniciada.",
+        `[Comando] ${target.command}`,
+        `[Directorio] ${target.working_dir}`,
+      ].join("\n")
+    );
+
+    setIsBottomPanelVisible(true);
+    setActiveBottomTab("console");
+
+    const isWindows = window.navigator.userAgent.toLowerCase().includes("windows");
+    const command = isWindows
+      ? Command.create("run-binary-win", ["/C", target.executable_path], {
+          cwd: target.working_dir,
+        })
+      : Command.create("run-binary-unix", ["-lc", `"${target.executable_path.replace(/"/g, "\\\"")}"`], {
+          cwd: target.working_dir,
+        });
+
+    command.stdout.on("data", (line) => {
+      appendConsoleOutput(String(line));
+    });
+
+    command.stderr.on("data", (line) => {
+      appendConsoleOutput(`[stderr] ${String(line)}`);
+    });
+
+    command.on("error", (error) => {
+      appendConsoleOutput(`[Consola][error] ${error}`);
+      interactiveChildRef.current = null;
+      setIsConsoleRunning(false);
+    });
+
+    command.on("close", ({ code, signal }) => {
+      appendConsoleOutput(
+        `[Consola] Proceso finalizado (exit=${code ?? "null"}, signal=${signal ?? "null"}).`
+      );
+      interactiveChildRef.current = null;
+      setIsConsoleRunning(false);
+    });
+
+    const child = await command.spawn();
+    interactiveChildRef.current = child;
+    setIsConsoleRunning(true);
+    setLastConsoleRun({ filePath });
+  };
+
+  const handleSendConsoleInput = async (input: string) => {
+    if (!interactiveChildRef.current || !isConsoleRunning) {
+      appendConsoleOutput("[Consola] No hay proceso activo para recibir input.");
+      return;
+    }
+
+    try {
+      await interactiveChildRef.current.write(`${input}\n`);
+      appendConsoleOutput(`> ${input}`);
+    } catch (error) {
+      appendConsoleOutput(
+        `[Consola][error] ${error instanceof Error ? error.message : String(error)}`
+      );
+      interactiveChildRef.current = null;
+      setIsConsoleRunning(false);
+    }
+  };
+
+  const handleClearConsoleOutput = () => {
+    setConsoleOutput("[Consola] Limpia.");
+  };
+
+  const handleRerunConsole = async () => {
+    if (!lastConsoleRun) {
+      appendConsoleOutput("[Consola] No hay ejecución previa para repetir.");
+      return;
+    }
+
+    try {
+      await startInteractiveRun(lastConsoleRun.filePath);
+    } catch (error) {
+      appendConsoleOutput(
+        `[Consola][error] ${error instanceof Error ? error.message : String(error)}`
+      );
+      setIsConsoleRunning(false);
+    }
+  };
+
   const handleRunTerminalCommand = async (commandText: string) => {
     const command = commandText.trim();
     if (!command || !projectPath) {
@@ -954,6 +1366,23 @@ export default function App() {
   const handleSaveSettings = (nextSettings: IDESettings) => {
     setSettings(nextSettings);
     setIsSettingsOpen(false);
+  };
+
+  const handleExplorerActivityClick = () => {
+    setActiveSideView("explorer");
+    setIsExplorerVisible((prev) => !prev);
+  };
+
+  const handleBottomResizerMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isBottomPanelVisible) return;
+    event.preventDefault();
+
+    bottomResizeRef.current = {
+      startY: event.clientY,
+      startHeight: bottomPanelHeight,
+    };
+
+    document.body.classList.add("is-resizing-bottom-panel");
   };
 
   const handleExecuteCommandPaletteAction = (actionId: CommandPaletteActionId) => {
@@ -1062,6 +1491,76 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const isToggleSidebarShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "b";
+
+      if (!isToggleSidebarShortcut || !hasProjectOpen) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (isTypingTarget) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsExplorerVisible((prev) => !prev);
+      setActiveSideView("explorer");
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [hasProjectOpen]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!bottomResizeRef.current || !isBottomPanelVisible) {
+        return;
+      }
+
+      const { startY, startHeight } = bottomResizeRef.current;
+      const delta = startY - event.clientY;
+
+      const workspaceHeight = mainWorkspaceRef.current?.clientHeight ?? window.innerHeight;
+      const minHeight = 120;
+      const maxHeight = Math.max(180, Math.floor(workspaceHeight * 0.7));
+      const nextHeight = Math.min(maxHeight, Math.max(minHeight, startHeight + delta));
+
+      setBottomPanelHeight(nextHeight);
+    };
+
+    const handleMouseUp = () => {
+      if (!bottomResizeRef.current) {
+        return;
+      }
+
+      bottomResizeRef.current = null;
+      document.body.classList.remove("is-resizing-bottom-panel");
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.classList.remove("is-resizing-bottom-panel");
+    };
+  }, [isBottomPanelVisible]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       const isCommandPaletteShortcut =
         (event.ctrlKey || event.metaKey) &&
         event.shiftKey &&
@@ -1082,6 +1581,15 @@ export default function App() {
     };
   }, [hasProjectOpen]);
 
+  useEffect(() => {
+    return () => {
+      if (interactiveChildRef.current) {
+        void interactiveChildRef.current.kill();
+        interactiveChildRef.current = null;
+      }
+    };
+  }, []);
+
   const handleCompileFile = async () => {
     if (!activeFile) {
       setBottomMessage("[Error] No hay archivo activo para compilar.");
@@ -1094,9 +1602,14 @@ export default function App() {
 
       const result = await invoke<CompileResult>("compile_file", {
         filePath: activeFile.path,
+        projectPath,
       });
 
       const parsed = parseGccOutput(result.stderr);
+      console.log("[DEBUG][Build] Command:", result.command);
+      console.log("[DEBUG][Build] Source files:", result.source_files);
+      console.log("[DEBUG][Build] Full stderr:\n", result.stderr);
+      console.log("[DEBUG][Build] Parsed diagnostics:", parsed);
       setDiagnostics(parsed);
       setIsBottomPanelVisible(true);
 
@@ -1116,7 +1629,7 @@ export default function App() {
             .filter(Boolean)
             .join("\n\n")
         );
-        setActiveBottomTab(parsed.length > 0 ? "problemas" : "output");
+        setActiveBottomTab(parsed.length > 0 ? "problems" : "output");
       } else {
         setBottomMessage(
           [
@@ -1128,7 +1641,7 @@ export default function App() {
             .filter(Boolean)
             .join("\n\n")
         );
-        setActiveBottomTab("problemas");
+        setActiveBottomTab("problems");
       }
     } catch (error) {
       console.error(error);
@@ -1141,16 +1654,23 @@ export default function App() {
   };
 
   const handleJumpToDiagnostic = async (item: DiagnosticItem) => {
+    if (!item.navigable || item.file === BUILD_DIAGNOSTIC_FILE) {
+      setIsBottomPanelVisible(true);
+      setActiveBottomTab("output");
+      setBottomMessage((prev) => `${prev}\n\n[Build][global] ${item.message}`.trim());
+      return;
+    }
+
     const existing = openFiles.find((f) => f.path === item.file);
     if (existing) {
-      setActiveFileId(existing.id);
+      navigateToDiagnosticLocation(existing, item.line, item.column);
     } else {
       try {
         const content = await readTextFile(item.file);
         const name = item.file.split(/[\\/]/).pop() ?? item.file;
         const lang = detectLanguage(name);
         const newFile: IDEFile = {
-          id: `${item.file}-${Date.now()}`,
+          id: crypto.randomUUID(),
           name,
           path: item.file,
           language: lang,
@@ -1159,12 +1679,11 @@ export default function App() {
           isDirty: false,
         };
         setOpenFiles((prev) => [...prev, newFile]);
-        setActiveFileId(newFile.id);
+        navigateToDiagnosticLocation(newFile, item.line, item.column);
       } catch {
         return;
       }
     }
-    setJumpToLine({ line: item.line, col: item.col, ts: Date.now() });
   };
 
   const handleRunFile = async () => {
@@ -1179,23 +1698,8 @@ export default function App() {
         if (!saved) return;
       }
 
-      const result = await invoke<RunResult>("run_file", {
-        filePath: activeFile.path,
-      });
-
-      setBottomMessage(
-        [
-          result.success ? "[Ejecución completada]" : "[Ejecución con errores]",
-          `[Comando] ${result.command}`,
-          result.exit_code !== undefined && result.exit_code !== null
-            ? `[Exit code] ${result.exit_code}`
-            : "",
-          result.stdout ? `[stdout]\n${result.stdout}` : "",
-          result.stderr ? `[stderr]\n${result.stderr}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n")
-      );
+      await startInteractiveRun(activeFile.path);
+      setBottomMessage("[Run] Ejecutando en Consola interactiva.");
     } catch (error) {
       console.error(error);
       setBottomMessage(
@@ -1220,9 +1724,14 @@ export default function App() {
 
       const compileResult = await invoke<CompileResult>("compile_file", {
         filePath: activeFile.path,
+        projectPath,
       });
 
       const parsedDiagnostics = parseGccOutput(compileResult.stderr);
+      console.log("[DEBUG][Build & Run] Command:", compileResult.command);
+      console.log("[DEBUG][Build & Run] Source files:", compileResult.source_files);
+      console.log("[DEBUG][Build & Run] Full stderr:\n", compileResult.stderr);
+      console.log("[DEBUG][Build & Run] Parsed diagnostics:", parsedDiagnostics);
       setDiagnostics(parsedDiagnostics);
       setIsBottomPanelVisible(true);
 
@@ -1238,21 +1747,15 @@ export default function App() {
             .filter(Boolean)
             .join("\n\n")
         );
-        setActiveBottomTab("problemas");
+        setActiveBottomTab("problems");
         return;
       }
 
       await refreshExplorer();
 
-      const runResult = await invoke<RunResult>("run_file", {
-        filePath: activeFile.path,
-      });
-
       setBottomMessage(
         [
-          runResult.success
-            ? "[Build & Run] Completado"
-            : "[Build & Run] Build exitoso, Run con errores",
+          "[Build & Run] Build exitoso. Ejecutando en Consola interactiva...",
           "[Build]",
           `[Comando] ${compileResult.command}`,
           compileResult.stdout ? `[stdout]\n${compileResult.stdout}` : "",
@@ -1260,18 +1763,11 @@ export default function App() {
           compileResult.executable_path
             ? `[Binario] ${compileResult.executable_path}`
             : "",
-          "[Run]",
-          `[Comando] ${runResult.command}`,
-          runResult.exit_code !== undefined && runResult.exit_code !== null
-            ? `[Exit code] ${runResult.exit_code}`
-            : "",
-          runResult.stdout ? `[stdout]\n${runResult.stdout}` : "",
-          runResult.stderr ? `[stderr]\n${runResult.stderr}` : "",
         ]
           .filter(Boolean)
           .join("\n\n")
       );
-      setActiveBottomTab("output");
+      await startInteractiveRun(activeFile.path);
     } catch (error) {
       console.error(error);
       setBottomMessage(
@@ -1292,10 +1788,12 @@ export default function App() {
         <WelcomeScreen
           mode="initial"
           onOpenFolder={handleOpenFolder}
-          recentProjects={recentProjects}
+          onCreateProject={handleCreateProjectFromWelcome}
+          recentProjects={recentProjects.slice(0, WELCOME_RECENT_PREVIEW_LIMIT)}
+          recentProjectsForModal={recentProjects.slice(0, MAX_RECENT_PROJECTS)}
+          missingRecentPaths={missingRecentPaths}
           lastProjectPath={lastProjectPath}
           onOpenRecentProject={handleOpenRecentProject}
-          invalidRecentPaths={invalidRecentPaths}
           onRemoveRecentProject={handleRemoveRecentProject}
         />
       </div>
@@ -1306,6 +1804,7 @@ export default function App() {
     <div className="app-shell">
       <TopBar
         onOpenFolder={handleOpenFolder}
+        onCreateFromNewMenu={handleCreateFromNewMenu}
         onRefreshExplorer={handleRefreshExplorer}
         onToggleTerminalPanel={() => setIsBottomPanelVisible((prev) => !prev)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -1315,13 +1814,14 @@ export default function App() {
         onBuildAndRun={handleBuildAndRunFile}
       />
 
-      <div className="app-body">
+      <div className={`app-body ${isExplorerVisible ? "" : "app-body-explorer-hidden"}`}>
         <ActivityBar
           activeView={activeSideView}
-          onSelectExplorer={() => setActiveSideView("explorer")}
+          isExplorerVisible={isExplorerVisible}
+          onSelectExplorer={handleExplorerActivityClick}
         />
 
-        {activeSideView === "explorer" && (
+        {isExplorerVisible && activeSideView === "explorer" && (
           <FileExplorer
             projectName={projectName}
             projectPath={projectPath}
@@ -1339,7 +1839,15 @@ export default function App() {
           />
         )}
 
-        <main className={`main-workspace ${isBottomPanelVisible ? "" : "main-workspace-no-bottom"}`}>
+        <main
+          ref={mainWorkspaceRef}
+          className={`main-workspace ${isBottomPanelVisible ? "" : "main-workspace-no-bottom"}`}
+          style={
+            isBottomPanelVisible
+              ? { gridTemplateRows: `1fr 6px ${bottomPanelHeight}px` }
+              : undefined
+          }
+        >
           {!hasActiveEditorFile ? (
             <WelcomeScreen
               mode="project"
@@ -1361,19 +1869,35 @@ export default function App() {
             />
           )}
           {isBottomPanelVisible && (
-            <BottomPanel
-              message={bottomMessage}
-              projectPath={projectPath}
-              activeTab={activeBottomTab}
-              terminalOutput={terminalOutput}
-              isRunningTerminalCommand={isRunningTerminalCommand}
-              diagnostics={diagnostics}
-              onSelectTab={setActiveBottomTab}
-              onRunTerminalCommand={handleRunTerminalCommand}
-              onClearTerminalOutput={handleClearTerminalOutput}
-              onJumpToDiagnostic={handleJumpToDiagnostic}
-              onToggleVisibility={() => setIsBottomPanelVisible(false)}
-            />
+            <>
+              <div
+                className="bottom-panel-resizer"
+                onMouseDown={handleBottomResizerMouseDown}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Redimensionar panel inferior"
+              />
+              <BottomPanel
+                message={bottomMessage}
+                projectPath={projectPath}
+                activeTab={activeBottomTab}
+                consoleOutput={consoleOutput}
+                isConsoleRunning={isConsoleRunning}
+                canRerunConsole={Boolean(lastConsoleRun)}
+                terminalOutput={terminalOutput}
+                isRunningTerminalCommand={isRunningTerminalCommand}
+                diagnostics={diagnostics}
+                onSelectTab={setActiveBottomTab}
+                onSendConsoleInput={handleSendConsoleInput}
+                onStopConsole={stopInteractiveProcess}
+                onClearConsoleOutput={handleClearConsoleOutput}
+                onRerunConsole={handleRerunConsole}
+                onRunTerminalCommand={handleRunTerminalCommand}
+                onClearTerminalOutput={handleClearTerminalOutput}
+                onJumpToDiagnostic={handleJumpToDiagnostic}
+                onToggleVisibility={() => setIsBottomPanelVisible(false)}
+              />
+            </>
           )}
         </main>
       </div>

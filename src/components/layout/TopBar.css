@@ -21,6 +21,46 @@
 .topbar-menu {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.topbar-dropdown {
+  position: relative;
+}
+
+.topbar-new-btn::after {
+  content: " ▾";
+  font-size: 11px;
+}
+
+.topbar-new-btn.open {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.topbar-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 170px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0f172a;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+}
+
+.topbar-dropdown-menu button {
+  text-align: left;
+  width: 100%;
+}
+
+.topbar-dropdown-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .topbar-menu button,
